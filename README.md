@@ -1,5 +1,8 @@
 # wxl-loot-beam
 
+## EXPERIMENTAL AND TOTALLY UNSTABLE
+
+
 A pillar of light over every corpse that can still be looted.
 
 Hunting for the body you just killed means squinting at a pile of grey models and reading nameplates.
