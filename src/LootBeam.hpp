@@ -44,8 +44,7 @@ namespace wxl::scripts::loot_beam
                                        // beam that never thins with distance stays a legible column
         float color[3]       = { 1.00f, 0.82f, 0.42f }; // warm gold
 
-        float groundAlpha    = 0.45f;  // opacity of the filled ground disc
-        float ringAlpha      = 0.90f;  // opacity of the bright ground ring
+        float groundAlpha    = 0.45f;  // opacity of the filled ground glow at its centre
         float beamAlpha      = 0.60f;  // opacity of the beam at its base
         float pulse          = 0.20f;  // slow breathing depth, 0 = steady
         float pulseSpeed     = 1.60f;  // breathing rate

@@ -19,15 +19,17 @@ than a light show.
 
 Every frame the module walks the resident unit objects through the SDK's object enumerator, drops any
 that are the player or still alive, and keeps the rest as beacon positions (optionally filtered to the
-ones the server still flags `UNIT_DYNFLAG_LOOTABLE`). Positions are turned into world-space shapes
-through the core's `wxl::game::gfx` toolbox and handed to the draw on `OnWorldSceneEnd`, which is the
-one point in the frame where geometry placed by world coordinate lands where its coordinates say -- the
-scene's own view and projection are still on the device and its depth buffer is complete. Nothing is
-retained: a body that stops being lootable loses its beacon with no cleanup.
+ones the server still flags `UNIT_DYNFLAG_LOOTABLE`). Positions are turned into world-space triangles
+and drawn on `OnWorldSceneEnd`, which is the one point in the frame where geometry placed by world
+coordinate lands where its coordinates say -- the scene's own view and projection are still on the
+device and its depth buffer is complete. Nothing is retained: a body that stops being lootable loses
+its beacon with no cleanup.
 
-The ground pool follows the terrain vertex by vertex and falls off smoothly from its hot middle
-outward; the shaft is one camera-facing billboard, gridded across its width and up its height so its
-horizontal and vertical falloffs read as a soft volume rather than a slab.
+The draw is additive (source alpha added to the frame, so the beacon glows and never dims what is
+behind it) with a colour on every vertex, so the GPU interpolates the falloffs and a handful of quads
+read as a soft volume. The ground pool follows the terrain vertex by vertex and falls off smoothly
+from its hot middle outward; the shaft is one camera-facing billboard, gridded across its width and up
+its height so its horizontal and vertical falloffs read as light rather than a slab.
 
 ## Tuning
 
@@ -41,7 +43,7 @@ with the defaults on first load.
 | `Height` | how far the beam rises, yards (default 15) |
 | `GroundRadius` | radius of the glow on the ground |
 | `BeamWidth` | half-width of the beam at its base |
-| `GroundAlpha`, `RingAlpha`, `BeamAlpha` | opacity of the disc, ring and beam |
+| `GroundAlpha`, `BeamAlpha` | opacity of the ground glow and the beam |
 | `Color` | tint, as `#RRGGBB` |
 | `Pulse`, `PulseSpeed` | breathing depth and rate |
 | `FadeIn`, `FadeOut` | seconds to ease a beacon in on appear / out on loot (0 = instant) |

@@ -246,7 +246,7 @@ namespace wxl::scripts::loot_beam
                    a.groundRadius == b.groundRadius && a.beamWidth == b.beamWidth &&
                    a.widthPerYard == b.widthPerYard &&
                    a.color[0] == b.color[0] && a.color[1] == b.color[1] && a.color[2] == b.color[2] &&
-                   a.groundAlpha == b.groundAlpha && a.ringAlpha == b.ringAlpha &&
+                   a.groundAlpha == b.groundAlpha &&
                    a.beamAlpha == b.beamAlpha && a.pulse == b.pulse && a.pulseSpeed == b.pulseSpeed &&
                    a.fadeIn == b.fadeIn && a.fadeOut == b.fadeOut &&
                    a.maxDistance == b.maxDistance && a.showGround == b.showGround &&
@@ -303,7 +303,6 @@ namespace wxl::scripts::loot_beam
         s.beamWidth      = ReadFloat(iniPath_, "BeamWidth",     s.beamWidth,     0.05f, 2.0f);
         s.widthPerYard   = ReadFloat(iniPath_, "WidthPerYard",  s.widthPerYard,  0.0f, 0.05f);
         s.groundAlpha    = ReadFloat(iniPath_, "GroundAlpha",   s.groundAlpha,   0.0f, 1.0f);
-        s.ringAlpha      = ReadFloat(iniPath_, "RingAlpha",     s.ringAlpha,     0.0f, 1.0f);
         s.beamAlpha      = ReadFloat(iniPath_, "BeamAlpha",     s.beamAlpha,     0.0f, 1.0f);
         s.pulse          = ReadFloat(iniPath_, "Pulse",         s.pulse,         0.0f, 1.0f);
         s.pulseSpeed     = ReadFloat(iniPath_, "PulseSpeed",    s.pulseSpeed,    0.0f, 6.0f);
@@ -376,7 +375,6 @@ namespace wxl::scripts::loot_beam
         WriteFloat(iniPath_, "BeamWidth",       style_.beamWidth);
         WriteFloat(iniPath_, "WidthPerYard",    style_.widthPerYard);
         WriteFloat(iniPath_, "GroundAlpha",     style_.groundAlpha);
-        WriteFloat(iniPath_, "RingAlpha",       style_.ringAlpha);
         WriteFloat(iniPath_, "BeamAlpha",       style_.beamAlpha);
         WriteFloat(iniPath_, "Pulse",           style_.pulse);
         WriteFloat(iniPath_, "PulseSpeed",      style_.pulseSpeed);
@@ -428,7 +426,6 @@ namespace wxl::scripts::loot_beam
             api.UiSliderFloat("Beam width (yd)", &style_.beamWidth, 0.05f, 2.0f);
             api.UiSliderFloat("Min width / yd", &style_.widthPerYard, 0.0f, 0.05f);
             api.UiSliderFloat("Ground alpha", &style_.groundAlpha, 0.0f, 1.0f);
-            api.UiSliderFloat("Ring alpha", &style_.ringAlpha, 0.0f, 1.0f);
             api.UiSliderFloat("Beam alpha", &style_.beamAlpha, 0.0f, 1.0f);
 
             float rgba[4] = { style_.color[0], style_.color[1], style_.color[2], 1.0f };
