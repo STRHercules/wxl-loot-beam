@@ -49,6 +49,8 @@ namespace wxl::scripts::loot_beam
         float beamAlpha      = 0.60f;  // opacity of the beam at its base
         float pulse          = 0.20f;  // slow breathing depth, 0 = steady
         float pulseSpeed     = 1.60f;  // breathing rate
+        float fadeIn         = 0.35f;  // seconds for a new beacon to reach full opacity (0 = instant)
+        float fadeOut        = 0.70f;  // seconds for a lost beacon to fade away (0 = instant)
 
         float maxDistance    = 0.0f;   // ignore corpses farther than this, yards (0 = unlimited)
         bool  showGround     = true;   // paint the glow on the ground
@@ -93,17 +95,25 @@ namespace wxl::scripts::loot_beam
         void OnWorldLeave(const events::WorldLeaveArgs& a);
 
         // --- steps ---
-        int  ScanUnits();                       // rebuild beacons_ for this frame; returns units seen
+        int  ScanUnits();                       // mark tracked beacons seen this frame; returns units seen
+        void UpdateFade(float dt);              // advance each beacon's fade; drop the dead ones
         void DumpUnit(void* unit, unsigned long long guid); // one-shot descriptor window for debugging
-        void QueueBeacon(const float pos[3], float pulseScale); // ground glow + beam into the gfx queue
+        void QueueBeacon(const float pos[3], float alphaScale); // ground glow + beam into the gfx queue
         void LoadConfigNow();
         void ReloadConfigIfChanged();
         void Log(int level, const char* fmt, ...) const;
 
-        struct Beacon { float pos[3]; };
+        struct Beacon
+        {
+            unsigned long long guid = 0;
+            float              pos[3] = {};
+            float              fade   = 0.0f; // 0..1 opacity multiplier, eased over fadeIn/fadeOut
+            bool               seen   = false;
+        };
 
-        Beacon         beacons_[kMaxBeacons]{};
-        int            beaconCount_ = 0;
+        Beacon         beacons_[kMaxBeacons]{}; // persists across frames so a beacon can fade
+        int            beaconCount_ = 0;        // tracked entries with a visible fade this frame
+        int            trackedCount_ = 0;
 
         BeamStyle      style_{};
         BeamStyle      saved_{}; // what the INI holds, for the unsaved-changes test

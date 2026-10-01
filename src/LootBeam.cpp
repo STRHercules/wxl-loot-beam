@@ -247,6 +247,7 @@ namespace wxl::scripts::loot_beam
                    a.color[0] == b.color[0] && a.color[1] == b.color[1] && a.color[2] == b.color[2] &&
                    a.groundAlpha == b.groundAlpha && a.ringAlpha == b.ringAlpha &&
                    a.beamAlpha == b.beamAlpha && a.pulse == b.pulse && a.pulseSpeed == b.pulseSpeed &&
+                   a.fadeIn == b.fadeIn && a.fadeOut == b.fadeOut &&
                    a.maxDistance == b.maxDistance && a.showGround == b.showGround &&
                    a.showBeam == b.showBeam && a.throughWalls == b.throughWalls &&
                    a.requireLootable == b.requireLootable;
@@ -305,6 +306,8 @@ namespace wxl::scripts::loot_beam
         s.beamAlpha      = ReadFloat(iniPath_, "BeamAlpha",     s.beamAlpha,     0.0f, 1.0f);
         s.pulse          = ReadFloat(iniPath_, "Pulse",         s.pulse,         0.0f, 1.0f);
         s.pulseSpeed     = ReadFloat(iniPath_, "PulseSpeed",    s.pulseSpeed,    0.0f, 6.0f);
+        s.fadeIn         = ReadFloat(iniPath_, "FadeIn",        s.fadeIn,        0.0f, 5.0f);
+        s.fadeOut        = ReadFloat(iniPath_, "FadeOut",       s.fadeOut,       0.0f, 5.0f);
         s.maxDistance    = ReadFloat(iniPath_, "MaxDistance",   s.maxDistance,   0.0f, 400.0f);
         s.showGround     = ReadBool(iniPath_,  "ShowGround",    s.showGround);
         s.showBeam       = ReadBool(iniPath_,  "ShowBeam",      s.showBeam);
@@ -376,6 +379,8 @@ namespace wxl::scripts::loot_beam
         WriteFloat(iniPath_, "BeamAlpha",       style_.beamAlpha);
         WriteFloat(iniPath_, "Pulse",           style_.pulse);
         WriteFloat(iniPath_, "PulseSpeed",      style_.pulseSpeed);
+        WriteFloat(iniPath_, "FadeIn",          style_.fadeIn);
+        WriteFloat(iniPath_, "FadeOut",         style_.fadeOut);
         WriteFloat(iniPath_, "MaxDistance",     style_.maxDistance);
         WriteInt(iniPath_,   "ShowGround",      style_.showGround ? 1 : 0);
         WriteInt(iniPath_,   "ShowBeam",        style_.showBeam ? 1 : 0);
@@ -438,6 +443,8 @@ namespace wxl::scripts::loot_beam
         {
             api.UiSliderFloat("Pulse", &style_.pulse, 0.0f, 1.0f);
             api.UiSliderFloat("Pulse speed", &style_.pulseSpeed, 0.0f, 6.0f);
+            api.UiSliderFloat("Fade in (s)", &style_.fadeIn, 0.0f, 5.0f);
+            api.UiSliderFloat("Fade out (s)", &style_.fadeOut, 0.0f, 5.0f);
             api.UiSliderFloat("Max distance (yd)", &style_.maxDistance, 0.0f, 400.0f);
 
             int ground = style_.showGround ? 1 : 0;
@@ -459,6 +466,11 @@ namespace wxl::scripts::loot_beam
 
     int LootBeam::ScanUnits()
     {
+        // Everything tracked starts unseen; a corpse that qualifies this frame marks itself seen, so
+        // what is left unseen afterward is a body that was looted or despawned and must fade out.
+        for (int i = 0; i < trackedCount_; ++i)
+            beacons_[i].seen = false;
+
         beaconCount_ = 0;
 
         // A zero active-player GUID means no live session, and the object walk dereferences the
@@ -485,7 +497,6 @@ namespace wxl::scripts::loot_beam
                     DumpUnit(obj, guid);
                 }
             }
-            if (beaconCount_ >= kMaxBeacons) return false;
             if (!IsLootableCorpse(obj, style_)) return true;
 
             float p[3];
@@ -499,14 +510,60 @@ namespace wxl::scripts::loot_beam
                 if (dx * dx + dy * dy + dz * dz > maxD2) return true;
             }
 
-            beacons_[beaconCount_].pos[0] = p[0];
-            beacons_[beaconCount_].pos[1] = p[1];
-            beacons_[beaconCount_].pos[2] = p[2];
-            ++beaconCount_;
+            // Match on GUID so a corpse keeps its fade level while it is tracked; a newly seen one
+            // enters at zero and eases up.
+            Beacon* b = nullptr;
+            for (int i = 0; i < trackedCount_; ++i)
+            {
+                if (beacons_[i].guid == guid) { b = &beacons_[i]; break; }
+            }
+            if (!b)
+            {
+                if (trackedCount_ >= kMaxBeacons) return true; // table full; let it go this pass
+                b = &beacons_[trackedCount_++];
+                b->guid = guid;
+                b->fade = 0.0f;
+            }
+            b->pos[0] = p[0];
+            b->pos[1] = p[1];
+            b->pos[2] = p[2];
+            b->seen   = true;
             return true;
         });
 
         return enumerated;
+    }
+
+    // Advances every tracked beacon's fade toward its target -- full when it was seen this frame, zero
+    // when it was not -- and forgets the ones that have finished fading out.
+    void LootBeam::UpdateFade(float dt)
+    {
+        const float inRate  = style_.fadeIn  > 0.001f ? 1.0f / style_.fadeIn  : 1.0e9f;
+        const float outRate = style_.fadeOut > 0.001f ? 1.0f / style_.fadeOut : 1.0e9f;
+
+        int kept = 0;
+        for (int i = 0; i < trackedCount_; ++i)
+        {
+            Beacon b = beacons_[i];
+            if (b.seen)
+            {
+                b.fade += inRate * dt;
+                if (b.fade > 1.0f) b.fade = 1.0f;
+            }
+            else
+            {
+                b.fade -= outRate * dt;
+                if (b.fade <= 0.0f) continue; // finished fading; forget it
+            }
+            beacons_[kept++] = b;
+        }
+        trackedCount_ = kept;
+
+        beaconCount_ = 0;
+        for (int i = 0; i < trackedCount_; ++i)
+        {
+            if (beacons_[i].fade > 0.001f) ++beaconCount_;
+        }
     }
 
     // Reads a window of the update-field block around where health is expected and writes it to the
@@ -546,7 +603,7 @@ namespace wxl::scripts::loot_beam
         Log(WXL_LOG_INFO, "diag: first unit guid=%llX dynflags%s", guid, window);
     }
 
-    void LootBeam::QueueBeacon(const float pos[3], float pulseScale)
+    void LootBeam::QueueBeacon(const float pos[3], float alphaScale)
     {
         const gfx::Depth depth = style_.throughWalls ? gfx::Depth::Through : gfx::Depth::Tested;
 
@@ -557,9 +614,9 @@ namespace wxl::scripts::loot_beam
         if (style_.showGround)
         {
             gfx::GroundDisc(pos, style_.groundRadius,
-                            Pack(style_.groundAlpha * pulseScale, style_.color), 28, 2, depth);
+                            Pack(style_.groundAlpha * alphaScale, style_.color), 28, 2, depth);
             gfx::GroundRing(pos, style_.groundRadius * 1.08f,
-                            Pack(style_.ringAlpha * pulseScale, style_.color), 40, depth);
+                            Pack(style_.ringAlpha * alphaScale, style_.color), 40, depth);
         }
 
         if (!style_.showBeam || style_.height <= 0.01f)
@@ -601,8 +658,8 @@ namespace wxl::scripts::loot_beam
                 const float w1 = fmaxf(style_.beamWidth * (1.0f - 0.65f * t1), minHalfWidth);
                 // Keep a floor under the top alpha as well: a column that fades to nothing well below
                 // its stated height reads as a short beam however tall it really is.
-                const float a0 = style_.beamAlpha * (1.0f - 0.65f * t0) * pulseScale;
-                const float a1 = style_.beamAlpha * (1.0f - 0.65f * t1) * pulseScale;
+                const float a0 = style_.beamAlpha * (1.0f - 0.65f * t0) * alphaScale;
+                const float a1 = style_.beamAlpha * (1.0f - 0.65f * t1) * alphaScale;
 
                 const float p0[3] = { pos[0] - ax * w0, pos[1] - ay * w0, z0 };
                 const float p1[3] = { pos[0] + ax * w0, pos[1] + ay * w0, z0 };
@@ -626,6 +683,7 @@ namespace wxl::scripts::loot_beam
     {
         inWorld_    = false;
         beaconCount_ = 0;
+        trackedCount_ = 0;
         gfx::Clear();
     }
 
@@ -646,11 +704,13 @@ namespace wxl::scripts::loot_beam
 
         if (!style_.enabled || !inWorld_)
         {
-            beaconCount_ = 0;
+            beaconCount_  = 0;
+            trackedCount_ = 0;
             return;
         }
 
         const int enumerated = ScanUnits();
+        UpdateFade(a.dt);
         if (beaconCount_ == 0)
         {
             if (!loggedFirstScan_)
@@ -679,10 +739,14 @@ namespace wxl::scripts::loot_beam
         }
 
         // -1..+1 mapped into [1 - pulse, 1], so the beacon never gets brighter than the configured
-        // alpha and a pulse of 0 is perfectly steady.
+        // alpha and a pulse of 0 is perfectly steady. The per-beacon fade folds in on top, so a body
+        // still fading in or out is dimmed for the whole of its crossing.
         const float pulseScale = 1.0f - 0.5f * style_.pulse * (1.0f - sinf(phase_));
-        for (int i = 0; i < beaconCount_; ++i)
-            QueueBeacon(beacons_[i].pos, pulseScale);
+        for (int i = 0; i < trackedCount_; ++i)
+        {
+            if (beacons_[i].fade <= 0.001f) continue;
+            QueueBeacon(beacons_[i].pos, pulseScale * beacons_[i].fade);
+        }
     }
 
     void LootBeam::OnWorldSceneEnd(const ev::WorldSceneEndArgs& a)
@@ -700,13 +764,19 @@ namespace wxl::scripts::loot_beam
         if (!loggedClipDiag_)
         {
             loggedClipDiag_ = true;
+            int first = -1;
+            for (int i = 0; i < trackedCount_; ++i)
+            {
+                if (beacons_[i].fade > 0.001f) { first = i; break; }
+            }
+            if (first < 0) first = 0;
             float eye[3];
             cam::GetPosition(eye);
             const float* view = cam::GetView();
             const float* proj = cam::GetProjection();
-            const float px = beacons_[0].pos[0] - eye[0];
-            const float py = beacons_[0].pos[1] - eye[1];
-            const float pz = beacons_[0].pos[2] - eye[2];
+            const float px = beacons_[first].pos[0] - eye[0];
+            const float py = beacons_[first].pos[1] - eye[1];
+            const float pz = beacons_[first].pos[2] - eye[2];
             const float vx = px * view[0] + py * view[4] + pz * view[8] + view[12];
             const float vy = px * view[1] + py * view[5] + pz * view[9] + view[13];
             const float vz = px * view[2] + py * view[6] + pz * view[10] + view[14];
@@ -718,7 +788,8 @@ namespace wxl::scripts::loot_beam
             Log(WXL_LOG_INFO,
                 "diag: beacon0=(%.0f,%.0f,%.0f) eye=(%.0f,%.0f,%.0f) dist=%.1f viewZ=%.1f "
                 "ndc=(%.2f,%.2f,%.2f) w=%.1f projFar=%.0f",
-                beacons_[0].pos[0], beacons_[0].pos[1], beacons_[0].pos[2], eye[0], eye[1], eye[2],
+                beacons_[first].pos[0], beacons_[first].pos[1], beacons_[first].pos[2], eye[0], eye[1],
+                eye[2],
                 dist, vz, cw != 0.0f ? cx / cw : 0.0f, cw != 0.0f ? cy / cw : 0.0f,
                 cw != 0.0f ? cz / cw : 0.0f, cw,
                 proj[10] > 0.0f && proj[10] < 1.0f ? -proj[14] / (proj[10] - 1.0f) : -1.0f);

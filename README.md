@@ -43,6 +43,7 @@ with the defaults on first load.
 | `GroundAlpha`, `RingAlpha`, `BeamAlpha` | opacity of the disc, ring and beam |
 | `Color` | tint, as `#RRGGBB` |
 | `Pulse`, `PulseSpeed` | breathing depth and rate |
+| `FadeIn`, `FadeOut` | seconds to ease a beacon in on appear / out on loot (0 = instant) |
 | `MaxDistance` | ignore corpses beyond this range (0 = unlimited) |
 | `ShowGround`, `ShowBeam` | keep just one half of the marker |
 | `ThroughWalls` | draw through terrain so the marker is always findable |
