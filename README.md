@@ -8,10 +8,11 @@ that can still be looted, so the one worth walking to announces itself. The beam
 by default -- tall enough to spot over a hill or through a crowd, short enough to stay a marker rather
 than a light show.
 
-- a filled, ground-hugging disc plus a bright ring marks the spot on the terrain;
-- a soft, tapering beam rises from it, fading out toward the top;
-- the whole thing breathes slowly so a live beacon never reads as scenery;
-- colour, size, height, opacity, range and the pulse are all tunable from the in-game overlay panel
+- a soft pool of light on the terrain, falling off smoothly from a hot centre rather than a flat circle;
+- a camera-facing shaft rises from it, bright at the base and fading to nothing at the top, with a
+  horizontal falloff that keeps its edges soft and its core whiter;
+- the whole thing breathes slowly and eases in and out, so a live beacon never reads as scenery;
+- colour, size, height, opacity, range, pulse and fade are all tunable from the in-game overlay panel
   under **Loot Beam**.
 
 ## How it works
@@ -24,9 +25,9 @@ one point in the frame where geometry placed by world coordinate lands where its
 scene's own view and projection are still on the device and its depth buffer is complete. Nothing is
 retained: a body that stops being lootable loses its beacon with no cleanup.
 
-The ground disc follows the terrain (one collision query per vertex), so it lies flat on a slope; the
-beam is billboarded toward the camera and built from two crossed planes, so it reads as a volume from
-any angle without meshing a cylinder.
+The ground pool follows the terrain vertex by vertex and falls off smoothly from its hot middle
+outward; the shaft is one camera-facing billboard, gridded across its width and up its height so its
+horizontal and vertical falloffs read as a soft volume rather than a slab.
 
 ## Tuning
 
