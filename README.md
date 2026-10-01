@@ -5,8 +5,9 @@ A pillar of light over every corpse that can still be looted.
 Hunting for the body you just killed means squinting at a pile of grey models and reading nameplates.
 **Loot Beam** puts a warm glow on the ground and a beam of light rising straight up from every NPC body
 that can still be looted, so the one worth walking to announces itself. The beam is capped at 15 yards
-by default -- tall enough to spot over a hill or through a crowd, short enough to stay a marker rather
-than a light show.
+by default -- tall enough to spot across a camp or clear a low rise, short enough to stay a marker
+rather than a light show. It is occluded by the world like any other geometry, unless **Through walls**
+is turned on.
 
 - a soft pool of light on the terrain, falling off smoothly from a hot centre rather than a flat circle;
 - a camera-facing shaft rises a little above the body and fades in from transparent there, peaking a
@@ -51,7 +52,7 @@ with the defaults on first load.
 | `FadeIn`, `FadeOut` | seconds to ease a beacon in on appear / out on loot (0 = instant) |
 | `MaxDistance` | ignore corpses beyond this range (0 = unlimited) |
 | `ShowGround`, `ShowBeam` | keep just one half of the marker |
-| `ThroughWalls` | draw through terrain so the marker is always findable |
+| `ThroughWalls` | draw through terrain and walls (off by default, so the world occludes the beam) |
 | `WidthPerYard` | minimum beam half-width per yard of camera distance |
 | `RequireLootable` | only beam corpses the server still flags lootable (default on) |
 

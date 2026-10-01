@@ -48,7 +48,7 @@ namespace wxl::scripts::loot_beam
         constexpr float       kUnitToByte = 255.0f;
         // Bumped when a shipped default changes in a way an existing file must adopt. A file older
         // than this has its stale distance/depth keys replaced with the always-visible defaults.
-        constexpr int         kConfigVersion = 3;
+        constexpr int         kConfigVersion = 4;
 
         // Descriptor reads are guarded: a wrong field index or a half-built object reads a nearby heap
         // dword. The validators reject an address that cannot be a live block before the SEH frame is
@@ -316,9 +316,9 @@ namespace wxl::scripts::loot_beam
         s.requireLootable= ReadBool(iniPath_,  "RequireLootable", s.requireLootable);
         ReadColor(iniPath_, "Color", s.color);
 
-        // A file written by an older build carries a distance cap and a depth-tested beacon that made
-        // it visible only up close. Adopt the always-visible defaults for exactly those keys and
-        // persist them, so an existing install does not have to be edited by hand.
+        // A file written by an older build carries a distance cap and the wrong idea of depth, so a
+        // few defaults are adopted for exactly those keys and persisted; an existing install then does
+        // not have to be edited by hand.
         const int version = GetPrivateProfileIntA(kIniSection, "ConfigVersion", 0, iniPath_.c_str());
         const bool migrated = version < kConfigVersion;
         if (migrated)
@@ -326,13 +326,16 @@ namespace wxl::scripts::loot_beam
             if (version < 2)
             {
                 s.maxDistance = 0.0f;
-                s.throughWalls = true;
                 if (s.beamWidth < 0.7f) s.beamWidth = 0.7f;
                 if (s.beamAlpha < 0.6f) s.beamAlpha = 0.6f;
             }
             // Version 3 marks only still-lootable corpses, so a looted body's beam goes away; older
             // files defaulted to marking every corpse.
             if (version < 3) s.requireLootable = true;
+            // Version 4 lets the world hide the beacon again: light does not shine through a wall, and
+            // a marker that does reads as a HUD element rather than something in the scene. Earlier
+            // files turned the depth test off while chasing visibility at range.
+            if (version < 4) s.throughWalls = false;
         }
 
         style_ = s;

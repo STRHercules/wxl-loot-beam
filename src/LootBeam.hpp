@@ -56,7 +56,7 @@ namespace wxl::scripts::loot_beam
         float maxDistance    = 0.0f;   // ignore corpses farther than this, yards (0 = unlimited)
         bool  showGround     = true;   // paint the glow on the ground
         bool  showBeam       = true;   // raise the beam
-        bool  throughWalls   = true;   // draw through terrain (a marker you can always find) or not
+        bool  throughWalls   = false;  // let the world occlude the beacon (default) or draw it through walls
 
         // true (the default) marks only corpses the server still flags lootable, so an already-looted
         // body goes dark; false marks every dead NPC.
