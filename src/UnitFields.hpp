@@ -36,16 +36,19 @@
 // legitimately hold before it is trusted (see LootBeam.cpp).
 namespace wxl_loot_beam
 {
-    /// Object -> its update-field block (CGObject_C::m_descriptors).
+    /// Object -> its update-field block (CGObject_C::m_descriptors). The core's ObjectBase.header and
+    /// wxl-modern-water's IsUnit both read this same pointer.
     constexpr size_t kObjectDescriptorField = 0x08;
 
-    /// UNIT_FIELD_HEALTH: OBJECT_END (6) + 0x18 = dword 0x1E -> byte 0x78. A living unit is nonzero
-    /// here; a corpse reads 0.
-    constexpr size_t kUnitHealthField = 0x78;
+    /// UNIT_FIELD_HEALTH: absolute field index 0x18 = OBJECT_END (6) + 0x12 -> byte 0x18 * 4 = 0x60.
+    /// A living unit is nonzero here; a corpse reads 0. (Not +0x18 from OBJECT_END -- 0x18 is the
+    /// absolute index, the delta is 0x12.)
+    constexpr size_t kUnitHealthField = 0x60;
 
-    /// UNIT_DYNAMIC_FLAGS: OBJECT_END (6) + 0x54 = dword 0x5A -> byte 0x168. Only used when the
-    /// strict-lootable option is on; the module model is health-driven.
-    constexpr size_t kUnitDynamicFlagsField = 0x168;
+    /// UNIT_DYNAMIC_FLAGS: absolute field index 0x49 -> byte 0x124. Only used when the strict-lootable
+    /// option is on; the module model is health-driven, and this offset is a best-effort reconstruction
+    /// of the 3.3.5 layout rather than one verified in a live client, hence the bit validation below.
+    constexpr size_t kUnitDynamicFlagsField = 0x124;
 
     /// UNIT_DYNFLAG_LOOTABLE, the bit the client sets while a corpse can still be looted.
     constexpr uint32_t kDynamicFlagLootable = 0x0001;

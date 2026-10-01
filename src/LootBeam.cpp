@@ -109,7 +109,9 @@ namespace wxl::scripts::loot_beam
             uintptr_t descriptors = 0;
             if (!ReadPtr(reinterpret_cast<uintptr_t>(unit) + kObjectDescriptorField, descriptors))
                 return false;
-            if (!ValidPointer(descriptors, kUnitDynamicFlagsField + sizeof(uint32_t)))
+            const size_t needed = style.requireLootable ? kUnitDynamicFlagsField + sizeof(uint32_t)
+                                                        : kUnitHealthField + sizeof(uint32_t);
+            if (!ValidPointer(descriptors, needed))
                 return false;
 
             uint32_t health = 0;
@@ -406,21 +408,30 @@ namespace wxl::scripts::loot_beam
         api.UiText(HasUnsavedChanges() ? "Unsaved changes" : "Matches wxl-loot-beam.ini");
     }
 
-    void LootBeam::ScanUnits()
+    int LootBeam::ScanUnits()
     {
         beaconCount_ = 0;
 
         // A zero active-player GUID means no live session, and the object walk dereferences the
         // thread-local object manager without checking -- do not enter it there.
         if (world::ActivePlayerGuid() == 0)
-            return;
+            return 0;
 
         float camera[3];
         cam::GetPosition(camera);
         const float maxD2 = style_.maxDistance > 0.0f ? style_.maxDistance * style_.maxDistance : 0.0f;
 
+        int  enumerated = 0;
+        bool dumped     = false;
+
         // The walk reads the resident-object list; it is main-thread only, which the logic tick is.
-        world::ForEachObject(world::kTypeMaskUnit, [&](unsigned long long, void* obj) -> bool {
+        world::ForEachObject(world::kTypeMaskUnit, [&](unsigned long long guid, void* obj) -> bool {
+            ++enumerated;
+            if (!dumped)
+            {
+                dumped = true;
+                DumpUnit(obj, guid);
+            }
             if (beaconCount_ >= kMaxBeacons) return false;
             if (!IsLootableCorpse(obj, style_)) return true;
 
@@ -441,6 +452,45 @@ namespace wxl::scripts::loot_beam
             ++beaconCount_;
             return true;
         });
+
+        return enumerated;
+    }
+
+    // Reads a window of the update-field block around where health is expected and writes it to the
+    // log, once per session. The field that reads 0 on a corpse is the health field; if none of them
+    // do, the descriptor layout assumption is wrong and the offsets in UnitFields.hpp need revising.
+    void LootBeam::DumpUnit(void* unit, unsigned long long guid)
+    {
+        uintptr_t descriptors = 0;
+        if (!ReadPtr(reinterpret_cast<uintptr_t>(unit) + kObjectDescriptorField, descriptors) ||
+            !ValidPointer(descriptors, 0x100))
+        {
+            Log(WXL_LOG_INFO, "diag: first unit guid=%llX has no readable descriptor", guid);
+            return;
+        }
+
+        char window[320] = {};
+        int  n = 0;
+        // Health lives at 0x60; the strict path's dynamic flags at 0x124. Dump both neighbourhoods so
+        // a future client build can be checked at a glance.
+        for (size_t off = 0x58; off <= 0x78 && n < int(sizeof(window)) - 24; off += 4)
+        {
+            uint32_t v = 0;
+            if (!ReadU32(descriptors + off, v))
+                v = 0xDEADBEEFu;
+            n += std::snprintf(window + n, sizeof(window) - n, " %02X=%u", unsigned(off), v);
+        }
+        Log(WXL_LOG_INFO, "diag: first unit guid=%llX desc=%p%s", guid, (void*)descriptors, window);
+
+        n = 0;
+        for (size_t off = 0x11C; off <= 0x12C && n < int(sizeof(window)) - 24; off += 4)
+        {
+            uint32_t v = 0;
+            if (!ReadU32(descriptors + off, v))
+                v = 0xDEADBEEFu;
+            n += std::snprintf(window + n, sizeof(window) - n, " %02X=%u", unsigned(off), v);
+        }
+        Log(WXL_LOG_INFO, "diag: first unit guid=%llX dynflags%s", guid, window);
     }
 
     void LootBeam::QueueBeacon(const float pos[3], float pulseScale)
@@ -505,9 +555,10 @@ namespace wxl::scripts::loot_beam
         }
     }
 
-    void LootBeam::OnWorldEnter(const ev::WorldEnterArgs&)
+    void LootBeam::OnWorldEnter(const ev::WorldEnterArgs& a)
     {
         inWorld_ = true;
+        Log(WXL_LOG_INFO, "world entered (map %u)", a.mapId);
     }
 
     void LootBeam::OnWorldLeave(const ev::WorldLeaveArgs&)
@@ -528,15 +579,43 @@ namespace wxl::scripts::loot_beam
         // under the next one.
         gfx::Clear();
 
+        // Derive the world state live rather than trusting OnWorldEnter alone: a module loaded after
+        // the client was already in-world would otherwise never see the enter event and stay dark.
+        inWorld_ = world::CurrentMapId() >= 0;
+
         if (!style_.enabled || !inWorld_)
         {
             beaconCount_ = 0;
             return;
         }
 
-        ScanUnits();
+        const int enumerated = ScanUnits();
         if (beaconCount_ == 0)
+        {
+            if (!loggedFirstScan_)
+            {
+                loggedFirstScan_ = true;
+                Log(WXL_LOG_INFO, "diag: map=%d player=%llu enumerated=%d beacons=0 (first scan)",
+                    world::CurrentMapId(), world::ActivePlayerGuid(), enumerated);
+            }
+            if (++emptyFrameStreak_ >= 240 && emptyWarnings_ < 5)
+            {
+                ++emptyWarnings_;
+                emptyFrameStreak_ = 0;
+                Log(WXL_LOG_WARN,
+                    "diag: 240 frames in world, enumerated=%d, no dead units -- the health field may be wrong",
+                    enumerated);
+            }
             return;
+        }
+        emptyFrameStreak_ = 0;
+
+        if (!loggedFirstScan_)
+        {
+            loggedFirstScan_ = true;
+            Log(WXL_LOG_INFO, "diag: map=%d player=%llu enumerated=%d beacons=%d (first scan)",
+                world::CurrentMapId(), world::ActivePlayerGuid(), enumerated, beaconCount_);
+        }
 
         // -1..+1 mapped into [1 - pulse, 1], so the beacon never gets brighter than the configured
         // alpha and a pulse of 0 is perfectly steady.
@@ -554,6 +633,14 @@ namespace wxl::scripts::loot_beam
         }
 
         gx::Device9 dev(a.device);
-        gfx::Flush(dev, a.sceneDepth);
+        const size_t queued = gfx::Pending();
+        const long   result = gfx::Flush(dev, a.sceneDepth);
+
+        if (!loggedFirstFlush_)
+        {
+            loggedFirstFlush_ = true;
+            Log(WXL_LOG_INFO, "diag: first flush dev=%p depth=%p queued=%zu result=%ld",
+                a.device, a.sceneDepth, queued, result);
+        }
     }
 }

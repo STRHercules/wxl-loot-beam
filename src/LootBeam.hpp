@@ -91,7 +91,8 @@ namespace wxl::scripts::loot_beam
         void OnWorldLeave(const events::WorldLeaveArgs& a);
 
         // --- steps ---
-        void ScanUnits();                       // rebuild beacons_ for this frame
+        int  ScanUnits();                       // rebuild beacons_ for this frame; returns units seen
+        void DumpUnit(void* unit, unsigned long long guid); // one-shot descriptor window for debugging
         void QueueBeacon(const float pos[3], float pulseScale); // ground glow + beam into the gfx queue
         void LoadConfigNow();
         void ReloadConfigIfChanged();
@@ -109,5 +110,11 @@ namespace wxl::scripts::loot_beam
         bool           inWorld_ = false;
         float          phase_   = 0.0f;
         const WXL_Api* api_     = nullptr;
+
+        // One-shot diagnostics: each fires once and then stays quiet.
+        bool           loggedFirstScan_  = false;
+        bool           loggedFirstFlush_ = false;
+        int            emptyFrameStreak_ = 0;
+        int            emptyWarnings_    = 0;
     };
 }
