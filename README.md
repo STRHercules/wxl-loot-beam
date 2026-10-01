@@ -46,13 +46,14 @@ with the defaults on first load.
 | `MaxDistance` | ignore corpses beyond this range (0 = unlimited) |
 | `ShowGround`, `ShowBeam` | keep just one half of the marker |
 | `ThroughWalls` | draw through terrain so the marker is always findable |
-| `RequireLootable` | only beam corpses the server still flags lootable |
+| `WidthPerYard` | minimum beam half-width per yard of camera distance |
+| `RequireLootable` | only beam corpses the server still flags lootable (default on) |
 
 ## Notes
 
-- By default (`RequireLootable=0`) every dead NPC is marked, because a body that is dead is almost
-  always one you can loot. Turn the option on to let an already-looted corpse go dark; it reads the
-  client's `UNIT_DYNAMIC_FLAGS`, and if that field cannot be trusted on a given client build it falls
-  back to the health-only verdict rather than turning into noise.
+- A looted body loses its beam. The default (`RequireLootable=1`) marks only corpses the server still
+  flags `UNIT_DYNFLAG_LOOTABLE`, so once you loot one the flag clears and the beacon goes away. Set it
+  to 0 to mark every dead NPC instead. If the flags field cannot be trusted on a given client build it
+  falls back to the health-only verdict rather than turning into noise.
 - Player corpses are left alone -- this marks NPC bodies.
 - Purely visual and client-side: the server never learns the beams exist.

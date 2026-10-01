@@ -47,7 +47,7 @@ namespace wxl::scripts::loot_beam
         constexpr float       kUnitToByte = 255.0f;
         // Bumped when a shipped default changes in a way an existing file must adopt. A file older
         // than this has its stale distance/depth keys replaced with the always-visible defaults.
-        constexpr int         kConfigVersion = 2;
+        constexpr int         kConfigVersion = 3;
 
         // Descriptor reads are guarded: a wrong field index or a half-built object reads a nearby heap
         // dword. The validators reject an address that cannot be a live block before the SEH frame is
@@ -96,6 +96,19 @@ namespace wxl::scripts::loot_beam
         }
 
         /**
+         * @brief Reads a unit's health field. False when the object has no readable update block.
+         */
+        bool UnitHealth(void* unit, uint32_t& health)
+        {
+            uintptr_t descriptors = 0;
+            if (!ReadPtr(reinterpret_cast<uintptr_t>(unit) + kObjectDescriptorField, descriptors))
+                return false;
+            if (!ValidPointer(descriptors, kUnitHealthField + sizeof(uint32_t)))
+                return false;
+            return ReadU32(descriptors + kUnitHealthField, health);
+        }
+
+        /**
          * @brief True when the object is a unit that is dead and (optionally) still flagged lootable.
          *
          * Dead is the health field being zero. The strict test adds UNIT_DYNFLAG_LOOTABLE, but only
@@ -109,20 +122,17 @@ namespace wxl::scripts::loot_beam
             if (!(mask & world::kTypeMaskUnit)) return false;
             if (mask & world::kTypeMaskPlayer) return false; // a player corpse gets its own marker
 
-            uintptr_t descriptors = 0;
-            if (!ReadPtr(reinterpret_cast<uintptr_t>(unit) + kObjectDescriptorField, descriptors))
-                return false;
-            const size_t needed = style.requireLootable ? kUnitDynamicFlagsField + sizeof(uint32_t)
-                                                        : kUnitHealthField + sizeof(uint32_t);
-            if (!ValidPointer(descriptors, needed))
-                return false;
-
-            uint32_t health = 0;
-            if (!ReadU32(descriptors + kUnitHealthField, health)) return false;
-            if (health != 0) return false;
+            uint32_t health = 1;
+            if (!UnitHealth(unit, health) || health != 0) return false;
 
             if (style.requireLootable)
             {
+                uintptr_t descriptors = 0;
+                if (!ReadPtr(reinterpret_cast<uintptr_t>(unit) + kObjectDescriptorField, descriptors))
+                    return false;
+                if (!ValidPointer(descriptors, kUnitDynamicFlagsField + sizeof(uint32_t)))
+                    return false;
+
                 uint32_t flags = 0;
                 const bool read = ReadU32(descriptors + kUnitDynamicFlagsField, flags);
                 if (read && (flags & ~kDynamicFlagKnownMask) == 0)
@@ -309,10 +319,16 @@ namespace wxl::scripts::loot_beam
         const bool migrated = version < kConfigVersion;
         if (migrated)
         {
-            s.maxDistance = 0.0f;
-            s.throughWalls = true;
-            if (s.beamWidth < 0.7f) s.beamWidth = 0.7f;
-            if (s.beamAlpha < 0.6f) s.beamAlpha = 0.6f;
+            if (version < 2)
+            {
+                s.maxDistance = 0.0f;
+                s.throughWalls = true;
+                if (s.beamWidth < 0.7f) s.beamWidth = 0.7f;
+                if (s.beamAlpha < 0.6f) s.beamAlpha = 0.6f;
+            }
+            // Version 3 marks only still-lootable corpses, so a looted body's beam goes away; older
+            // files defaulted to marking every corpse.
+            if (version < 3) s.requireLootable = true;
         }
 
         style_ = s;
@@ -462,8 +478,12 @@ namespace wxl::scripts::loot_beam
             ++enumerated;
             if (!dumped)
             {
-                dumped = true;
-                DumpUnit(obj, guid);
+                uint32_t h = 1;
+                if (UnitHealth(obj, h) && h == 0)
+                {
+                    dumped = true;
+                    DumpUnit(obj, guid);
+                }
             }
             if (beaconCount_ >= kMaxBeacons) return false;
             if (!IsLootableCorpse(obj, style_)) return true;
@@ -504,7 +524,7 @@ namespace wxl::scripts::loot_beam
 
         char window[320] = {};
         int  n = 0;
-        // Health lives at 0x60; the strict path's dynamic flags at 0x124. Dump both neighbourhoods so
+        // Health lives at 0x60; the strict path's dynamic flags at 0x13C. Dump both neighbourhoods so
         // a future client build can be checked at a glance.
         for (size_t off = 0x58; off <= 0x78 && n < int(sizeof(window)) - 24; off += 4)
         {
@@ -516,7 +536,7 @@ namespace wxl::scripts::loot_beam
         Log(WXL_LOG_INFO, "diag: first unit guid=%llX desc=%p%s", guid, (void*)descriptors, window);
 
         n = 0;
-        for (size_t off = 0x11C; off <= 0x12C && n < int(sizeof(window)) - 24; off += 4)
+        for (size_t off = 0x12C; off <= 0x140 && n < int(sizeof(window)) - 24; off += 4)
         {
             uint32_t v = 0;
             if (!ReadU32(descriptors + off, v))

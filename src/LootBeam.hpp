@@ -55,9 +55,9 @@ namespace wxl::scripts::loot_beam
         bool  showBeam       = true;   // raise the beam
         bool  throughWalls   = true;   // draw through terrain (a marker you can always find) or not
 
-        // false (the default) marks every dead NPC; true additionally requires the server's
-        // UNIT_DYNFLAG_LOOTABLE bit, so an already-looted corpse goes dark.
-        bool  requireLootable = false;
+        // true (the default) marks only corpses the server still flags lootable, so an already-looted
+        // body goes dark; false marks every dead NPC.
+        bool  requireLootable = true;
     };
 
     class LootBeam final : public wxl::ext::EventScript

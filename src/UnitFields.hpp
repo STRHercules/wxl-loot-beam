@@ -45,10 +45,13 @@ namespace wxl_loot_beam
     /// absolute index, the delta is 0x12.)
     constexpr size_t kUnitHealthField = 0x60;
 
-    /// UNIT_DYNAMIC_FLAGS: absolute field index 0x49 -> byte 0x124. Only used when the strict-lootable
-    /// option is on; the module model is health-driven, and this offset is a best-effort reconstruction
-    /// of the 3.3.5 layout rather than one verified in a live client, hence the bit validation below.
-    constexpr size_t kUnitDynamicFlagsField = 0x124;
+    /// UNIT_DYNAMIC_FLAGS: absolute field index 0x4F -> byte 0x13C. Cross-checked against the
+    /// index-0x3B (byte 0xEC) UNIT_FIELD_FLAGS and index-0x43 (byte 0x10C) UNIT_FIELD_DISPLAYID
+    /// landmarks: MOUNTDISPLAYID 0x114, then MINDAMAGE 0x118, MAXDAMAGE 0x11C, MINOFFHAND 0x120,
+    /// MAXOFFHAND 0x124, BYTES_1 0x128, PETNUMBER 0x12C, PET_NAME_TIMESTAMP 0x130, PETEXPERIENCE
+    /// 0x134, PETNEXTLEVELEXP 0x138, DYNAMIC_FLAGS 0x13C. The 0x0001 LOOTABLE bit is set while a
+    /// corpse can still be looted and clears once it has been.
+    constexpr size_t kUnitDynamicFlagsField = 0x13C;
 
     /// UNIT_DYNFLAG_LOOTABLE, the bit the client sets while a corpse can still be looted.
     constexpr uint32_t kDynamicFlagLootable = 0x0001;
