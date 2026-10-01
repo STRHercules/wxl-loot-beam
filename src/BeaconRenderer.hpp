@@ -48,7 +48,10 @@ namespace wxl::scripts::loot_beam::beacon_gfx
     /// changes its depth; pulling every vertex in by a small, real distance therefore outruns the LOD
     /// without letting the beacon through anything that is genuinely nearer. 0 disables the pull.
     ///
-    void SetPush(float yards);
+    /// @param yards    constant pull applied at every distance.
+    /// @param perYard  extra pull per yard of camera distance, for error that grows with range.
+    ///
+    void SetPush(float yards, float perYard);
 
     /// Queues a triangle with an independent colour at each vertex (Gouraud-interpolated).
     void Triangle(const float a[3], const float b[3], const float c[3],

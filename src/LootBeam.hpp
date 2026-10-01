@@ -57,9 +57,11 @@ namespace wxl::scripts::loot_beam
         bool  showGround     = true;   // paint the glow on the ground
         bool  showBeam       = true;   // raise the beam
         bool  throughWalls   = false;  // let the world occlude the beacon (default) or draw it through walls
-        float depthPush      = 2.0f;   // pull the beacon this many yards toward the camera along the view
+        float depthPush      = 1.5f;   // pull the beacon this many yards toward the camera along the view
                                        // ray, so the rendered terrain LOD does not hide it at range;
                                        // only affects depth, never screen position (0 = off)
+        float depthPushPerYard = 0.02f; // extra pull per yard of distance, for depth error that grows
+                                       // with range (0 = off)
 
         // true (the default) marks only corpses the server still flags lootable, so an already-looted
         // body goes dark; false marks every dead NPC.

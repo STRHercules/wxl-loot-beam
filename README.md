@@ -54,6 +54,7 @@ with the defaults on first load.
 | `ShowGround`, `ShowBeam` | keep just one half of the marker |
 | `ThroughWalls` | draw through terrain and walls (off by default, so the world occludes the beam) |
 | `DepthPush` | yards to pull the beacon toward the camera so terrain LOD does not hide it (0 = off) |
+| `DepthPushPerYard` | extra pull per yard of distance, for depth error that grows with range (0 = off) |
 | `WidthPerYard` | minimum beam half-width per yard of camera distance |
 | `RequireLootable` | only beam corpses the server still flags lootable (default on) |
 

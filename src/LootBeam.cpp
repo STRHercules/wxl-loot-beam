@@ -251,7 +251,7 @@ namespace wxl::scripts::loot_beam
                    a.fadeIn == b.fadeIn && a.fadeOut == b.fadeOut &&
                    a.maxDistance == b.maxDistance && a.showGround == b.showGround &&
                    a.showBeam == b.showBeam && a.throughWalls == b.throughWalls &&
-                   a.depthPush == b.depthPush &&
+                   a.depthPush == b.depthPush && a.depthPushPerYard == b.depthPushPerYard &&
                    a.requireLootable == b.requireLootable;
         }
     }
@@ -315,6 +315,7 @@ namespace wxl::scripts::loot_beam
         s.showBeam       = ReadBool(iniPath_,  "ShowBeam",      s.showBeam);
         s.throughWalls   = ReadBool(iniPath_,  "ThroughWalls",  s.throughWalls);
         s.depthPush      = ReadFloat(iniPath_, "DepthPush",     s.depthPush,     0.0f, 6.0f);
+        s.depthPushPerYard = ReadFloat(iniPath_, "DepthPushPerYard", s.depthPushPerYard, 0.0f, 0.2f);
         s.requireLootable= ReadBool(iniPath_,  "RequireLootable", s.requireLootable);
         ReadColor(iniPath_, "Color", s.color);
 
@@ -392,6 +393,7 @@ namespace wxl::scripts::loot_beam
         WriteInt(iniPath_,   "ShowBeam",        style_.showBeam ? 1 : 0);
         WriteInt(iniPath_,   "ThroughWalls",    style_.throughWalls ? 1 : 0);
         WriteFloat(iniPath_, "DepthPush",       style_.depthPush);
+        WriteFloat(iniPath_, "DepthPushPerYard", style_.depthPushPerYard);
         WriteInt(iniPath_,   "RequireLootable", style_.requireLootable ? 1 : 0);
         WriteColor(iniPath_, "Color",           style_.color);
         WriteInt(iniPath_,   "ConfigVersion",   kConfigVersion);
@@ -461,7 +463,10 @@ namespace wxl::scripts::loot_beam
             int walls = style_.throughWalls ? 1 : 0;
             if (api.UiCheckbox("Through walls", &walls)) style_.throughWalls = walls != 0;
             if (!style_.throughWalls)
+            {
                 api.UiSliderFloat("Depth push (yd)", &style_.depthPush, 0.0f, 4.0f);
+                api.UiSliderFloat("Depth push / yd", &style_.depthPushPerYard, 0.0f, 0.1f);
+            }
             int lootable = style_.requireLootable ? 1 : 0;
             if (api.UiCheckbox("Only lootable corpses", &lootable)) style_.requireLootable = lootable != 0;
         }
@@ -663,6 +668,10 @@ namespace wxl::scripts::loot_beam
                 const float y = pos[1] + sinf(angle) * radius;
                 float z = pos[2];
                 world::GroundZ(x, y, pos[2], z);
+                // A miss, or a hit on a lower layer (a cave beneath a slope), must not sink the pool
+                // far below the body; clamp it to the body's own neighbourhood.
+                if (z < pos[2] - 3.0f) z = pos[2] - 3.0f;
+                if (z > pos[2] + 3.0f) z = pos[2] + 3.0f;
                 out[0] = x; out[1] = y; out[2] = z + kLift;
             };
 
@@ -775,17 +784,19 @@ namespace wxl::scripts::loot_beam
     void LootBeam::QueueBeacon(const float pos[3], float alphaScale)
     {
         beacon_gfx::SetDepth(style_.throughWalls ? gfx::Depth::Through : gfx::Depth::Tested);
-        beacon_gfx::SetPush(style_.throughWalls ? 0.0f : style_.depthPush);
+        beacon_gfx::SetPush(style_.throughWalls ? 0.0f : style_.depthPush,
+                            style_.throughWalls ? 0.0f : style_.depthPushPerYard);
 
-        float groundZ = pos[2];
-        if (!world::GroundZ(pos[0], pos[1], pos[2], groundZ))
-            groundZ = pos[2];
+        // The body is on the ground, so its own position is the height the shaft rises from. Only the
+        // pool needs a ground query, because it follows the terrain away from the body; using a query
+        // for the shaft too risked a bad hit on a lower surface burying it under the rendered terrain.
+        const float baseZ = pos[2];
 
         if (style_.showGround)
             QueueGroundGlow(pos, style_, alphaScale);
 
         if (style_.showBeam && style_.height > 0.01f)
-            QueueBeamColumn(pos, groundZ, style_, alphaScale);
+            QueueBeamColumn(pos, baseZ, style_, alphaScale);
     }
 
     void LootBeam::OnWorldEnter(const ev::WorldEnterArgs& a)
@@ -902,12 +913,13 @@ namespace wxl::scripts::loot_beam
             const float dist = sqrtf(px * px + py * py + pz * pz);
             Log(WXL_LOG_INFO,
                 "diag: beacon0=(%.0f,%.0f,%.0f) eye=(%.0f,%.0f,%.0f) dist=%.1f viewZ=%.1f "
-                "ndc=(%.2f,%.2f,%.2f) w=%.1f projFar=%.0f",
+                "ndc=(%.2f,%.2f,%.2f) w=%.1f projFar=%.0f proj10=%.4f proj11=%.4f proj14=%.2f",
                 beacons_[first].pos[0], beacons_[first].pos[1], beacons_[first].pos[2], eye[0], eye[1],
                 eye[2],
                 dist, vz, cw != 0.0f ? cx / cw : 0.0f, cw != 0.0f ? cy / cw : 0.0f,
                 cw != 0.0f ? cz / cw : 0.0f, cw,
-                proj[10] > 0.0f && proj[10] < 1.0f ? -proj[14] / (proj[10] - 1.0f) : -1.0f);
+                proj[14] != 0.0f ? -proj[14] / proj[10] : -1.0f,
+                proj[10], proj[11], proj[14]);
         }
 
         const size_t queued = beacon_gfx::Pending();

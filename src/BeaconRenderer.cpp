@@ -34,7 +34,8 @@ namespace wxl::scripts::loot_beam::beacon_gfx
 
         std::vector<Vertex> g_vertices;
         gfx::Depth          g_depth = gfx::Depth::Tested;
-        float               g_push  = 0.0f;
+        float               g_push       = 0.0f;
+        float               g_pushPerYard = 0.0f;
 
         // D3DBLEND_ONE. The SDK names only the two source-over factors it needs; additive is the whole
         // point here, so the constant is carried locally rather than widening the core's enum.
@@ -59,7 +60,11 @@ namespace wxl::scripts::loot_beam::beacon_gfx
     void Clear() { g_vertices.clear(); }
     size_t Pending() { return g_vertices.size() / 3; }
     void SetDepth(gfx::Depth depth) { g_depth = depth; }
-    void SetPush(float yards) { g_push = yards > 0.0f ? yards : 0.0f; }
+    void SetPush(float yards, float perYard)
+    {
+        g_push        = yards    > 0.0f ? yards    : 0.0f;
+        g_pushPerYard = perYard  > 0.0f ? perYard  : 0.0f;
+    }
 
     void Triangle(const float a[3], const float b[3], const float c[3],
                   gfx::Color ca, gfx::Color cb, gfx::Color cc)
@@ -127,7 +132,7 @@ namespace wxl::scripts::loot_beam::beacon_gfx
         // screen pixel and only loses depth, so this is a distance (yards the terrain LOD can differ
         // by) rather than a depth-buffer unit -- and it cannot reorder the beacon against anything more
         // than `push` yards nearer than it.
-        if (g_push > 0.0f)
+        if (g_push > 0.0f || g_pushPerYard > 0.0f)
         {
             for (Vertex& v : g_vertices)
             {
@@ -137,7 +142,7 @@ namespace wxl::scripts::loot_beam::beacon_gfx
                 const float dist = sqrtf(dx * dx + dy * dy + dz * dz);
                 if (dist <= 1.0e-3f) continue;
 
-                float near = dist - g_push;
+                float near = dist - (g_push + g_pushPerYard * dist);
                 if (near < dist * 0.25f) near = dist * 0.25f; // never cross the eye
                 const float s = near / dist;
                 v.x = eye[0] + dx * s;
