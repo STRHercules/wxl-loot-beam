@@ -15,6 +15,7 @@
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 #include "LootBeam.hpp"
+#include "BeaconRenderer.hpp"
 #include "UnitFields.hpp"
 
 #include "game/Camera.hpp"
@@ -625,21 +626,31 @@ namespace wxl::scripts::loot_beam
             return Pack(alpha, c);
         }
 
-        // A pool of light on the ground, built ring by ring so its opacity falls off smoothly from the
-        // hot centre to nothing at the rim and follows the terrain at every vertex. A single flat disc
-        // reads as a painted circle; stacking a few flat discs reads as bands.
-        void QueueGroundGlow(const float pos[3], const BeamStyle& style, float alphaScale, gfx::Depth depth)
+        // A pool of light on the ground, built ring by ring with a colour on every vertex, so opacity
+        // and tint fall off smoothly from the hot centre to nothing at the rim and the GPU interpolates
+        // between rings. Every vertex is dropped onto the terrain, so it lies on a slope.
+        void QueueGroundGlow(const float pos[3], const BeamStyle& style, float alphaScale)
         {
             constexpr int   kSegments = 28;
-            constexpr int   kRings    = 6;
+            constexpr int   kRings    = 5;
             constexpr float kLift     = 0.12f; // clear of the terrain so it does not z-fight it
 
-            float centre[3];
-            {
+            auto ringColor = [&](float radial) -> gfx::Color {
+                const float fall = SoftEdge(radial); // 1 at the core, 0 at the rim
+                return PackTint(style.groundAlpha * fall * alphaScale * 0.9f, style.color, 0.35f * fall);
+            };
+            auto ringPoint = [&](float radius, int i, float out[3]) {
+                const float angle = kTwoPi * float(i) / float(kSegments);
+                const float x = pos[0] + cosf(angle) * radius;
+                const float y = pos[1] + sinf(angle) * radius;
                 float z = pos[2];
-                world::GroundZ(pos[0], pos[1], pos[2], z);
-                centre[0] = pos[0]; centre[1] = pos[1]; centre[2] = z + kLift;
-            }
+                world::GroundZ(x, y, pos[2], z);
+                out[0] = x; out[1] = y; out[2] = z + kLift;
+            };
+
+            float centre[3];
+            ringPoint(0.0f, 0, centre); // angle is irrelevant at radius 0
+            const gfx::Color centreColor = ringColor(0.0f);
 
             float inner[kSegments][3] = {};
             float outer[kSegments][3] = {};
@@ -648,52 +659,39 @@ namespace wxl::scripts::loot_beam
             {
                 const float radius = style.groundRadius * float(r) / float(kRings);
                 for (int i = 0; i < kSegments; ++i)
-                {
-                    const float angle = kTwoPi * float(i) / float(kSegments);
-                    const float x = pos[0] + cosf(angle) * radius;
-                    const float y = pos[1] + sinf(angle) * radius;
-                    float z = pos[2];
-                    world::GroundZ(x, y, pos[2], z);
-                    outer[i][0] = x; outer[i][1] = y; outer[i][2] = z + kLift;
-                }
+                    ringPoint(radius, i, outer[i]);
 
-                const float fall = SoftEdge(float(r) / float(kRings)); // 1 at the core, 0 at the rim
-                const float alpha = style.groundAlpha * alphaScale * fall * 0.9f;
-                if (alpha <= 0.002f)
+                const gfx::Color outerColor = ringColor(float(r) / float(kRings));
+
+                if (r == 1)
                 {
                     for (int i = 0; i < kSegments; ++i)
-                        for (int k = 0; k < 3; ++k) inner[i][k] = outer[i][k];
-                    continue;
-                }
-                const gfx::Color c = PackTint(alpha, style.color, 0.35f * fall);
-
-                for (int i = 0; i < kSegments; ++i)
-                {
-                    const int n = (i + 1) % kSegments;
-                    if (r == 1)
-                        gfx::Triangle(centre, outer[i], outer[n], c, depth);
-                    else
                     {
-                        gfx::Triangle(inner[i], outer[i], outer[n], c, depth);
-                        gfx::Triangle(inner[i], outer[n], inner[n], c, depth);
+                        const int n = (i + 1) % kSegments;
+                        beacon_gfx::Triangle(centre, outer[i], outer[n], centreColor, outerColor, outerColor);
+                    }
+                }
+                else
+                {
+                    const gfx::Color innerColor = ringColor(float(r - 1) / float(kRings));
+                    for (int i = 0; i < kSegments; ++i)
+                    {
+                        const int n = (i + 1) % kSegments;
+                        beacon_gfx::Triangle(inner[i], outer[i], outer[n], innerColor, outerColor, outerColor);
+                        beacon_gfx::Triangle(inner[i], outer[n], inner[n], innerColor, outerColor, innerColor);
                     }
                 }
 
                 for (int i = 0; i < kSegments; ++i)
                     for (int k = 0; k < 3; ++k) inner[i][k] = outer[i][k];
             }
-
-            // A faint halo at the rim to soften where the pool ends.
-            gfx::GroundRing(pos, style.groundRadius,
-                            PackTint(style.ringAlpha * 0.28f * alphaScale, style.color, 0.0f), 48, depth);
         }
 
-        // The shaft: one camera-facing billboard, gridded across its width and up its height. Each cell
-        // takes an opacity from a horizontal falloff (bright core, transparent edges) times a vertical
-        // one (strong at the base, easing to nothing at the top) and its tint is whited toward the core.
-        // Enough cells make the gradients read as a soft volume; a single quad per band read as a slab.
-        void QueueBeamColumn(const float pos[3], float groundZ, const BeamStyle& style, float alphaScale,
-                             gfx::Depth depth)
+        // The shaft: one camera-facing billboard, gridded so a colour can sit on every vertex. The
+        // horizontal falloff keeps the core bright and the edges transparent; the vertical one is strong
+        // at the base and eases to nothing at the top. Interpolated across the grid, a few quads read as
+        // a soft, hot-cored volume.
+        void QueueBeamColumn(const float pos[3], float groundZ, const BeamStyle& style, float alphaScale)
         {
             float camera[3];
             cam::GetPosition(camera);
@@ -703,7 +701,7 @@ namespace wxl::scripts::loot_beam
             const float len = sqrtf(dx * dx + dy * dy);
             const float dist = sqrtf(dx * dx + dy * dy + dz * dz);
 
-            // Billboard across the view direction: the only vertical plane the camera ever sees face-on.
+            // Billboard across the view direction: the only vertical plane the camera sees face-on.
             float fx = 1.0f, fy = 0.0f;
             if (len > 1e-3f) { fx = dx / len; fy = dy / len; }
             const float sx = -fy, sy = fx;
@@ -712,38 +710,45 @@ namespace wxl::scripts::loot_beam
             // so a distant corpse still shows a column. 0 leaves the taper alone.
             const float minHalfWidth = style.widthPerYard > 0.0f ? style.widthPerYard * dist : 0.0f;
 
+            constexpr int kRows = 8;
+            constexpr int kCols = 4;
+
             const float baseZ = groundZ + 0.05f;
             const float topZ  = groundZ + style.height;
-            constexpr int kRows = 12;
-            constexpr int kCols = 6;
+
+            float      xs[kRows + 1][kCols + 1];
+            float      ys[kRows + 1][kCols + 1];
+            float      zs[kRows + 1];
+            gfx::Color cs[kRows + 1][kCols + 1];
+
+            for (int r = 0; r <= kRows; ++r)
+            {
+                const float t = float(r) / float(kRows);
+                const float w = fmaxf(style.beamWidth * (1.0f - 0.55f * t), minHalfWidth);
+                const float v = powf(1.0f - t, 1.3f);
+                zs[r] = baseZ + (topZ - baseZ) * t;
+
+                for (int c = 0; c <= kCols; ++c)
+                {
+                    const float u = -1.0f + 2.0f * float(c) / float(kCols);
+                    const float h = SoftEdge(fabsf(u));
+                    xs[r][c] = pos[0] + sx * (w * u);
+                    ys[r][c] = pos[1] + sy * (w * u);
+                    cs[r][c] = PackTint(style.beamAlpha * v * h * alphaScale, style.color,
+                                        0.45f * h * (1.0f - 0.3f * t));
+                }
+            }
 
             for (int r = 0; r < kRows; ++r)
             {
-                const float t0 = float(r) / float(kRows);
-                const float t1 = float(r + 1) / float(kRows);
-                const float z0 = baseZ + (topZ - baseZ) * t0;
-                const float z1 = baseZ + (topZ - baseZ) * t1;
-                const float w0 = fmaxf(style.beamWidth * (1.0f - 0.55f * t0), minHalfWidth);
-                const float w1 = fmaxf(style.beamWidth * (1.0f - 0.55f * t1), minHalfWidth);
-                const float vv = 0.5f * (powf(1.0f - t0, 1.4f) + powf(1.0f - t1, 1.4f));
-
                 for (int c = 0; c < kCols; ++c)
                 {
-                    const float u0 = -1.0f + 2.0f * float(c) / float(kCols);
-                    const float u1 = -1.0f + 2.0f * float(c + 1) / float(kCols);
-                    const float h  = SoftEdge(fabsf(0.5f * (u0 + u1))); // 1 at the core, 0 at the rim
-                    const float alpha = style.beamAlpha * vv * h * alphaScale;
-                    if (alpha <= 0.002f) continue;
-
-                    const gfx::Color col = PackTint(alpha, style.color, 0.45f * h);
-                    const float ax = sx, ay = sy;
-
-                    const float p0[3] = { pos[0] + ax * (w0 * u0), pos[1] + ay * (w0 * u0), z0 };
-                    const float p1[3] = { pos[0] + ax * (w0 * u1), pos[1] + ay * (w0 * u1), z0 };
-                    const float p2[3] = { pos[0] + ax * (w1 * u1), pos[1] + ay * (w1 * u1), z1 };
-                    const float p3[3] = { pos[0] + ax * (w1 * u0), pos[1] + ay * (w1 * u0), z1 };
-                    gfx::Triangle(p0, p1, p2, col, depth);
-                    gfx::Triangle(p0, p2, p3, col, depth);
+                    const float p00[3] = { xs[r][c],         ys[r][c],         zs[r] };
+                    const float p10[3] = { xs[r][c + 1],     ys[r][c + 1],     zs[r] };
+                    const float p11[3] = { xs[r + 1][c + 1], ys[r + 1][c + 1], zs[r + 1] };
+                    const float p01[3] = { xs[r + 1][c],     ys[r + 1][c],     zs[r + 1] };
+                    beacon_gfx::Triangle(p00, p10, p11, cs[r][c], cs[r][c + 1], cs[r + 1][c + 1]);
+                    beacon_gfx::Triangle(p00, p11, p01, cs[r][c], cs[r + 1][c + 1], cs[r + 1][c]);
                 }
             }
         }
@@ -751,17 +756,17 @@ namespace wxl::scripts::loot_beam
 
     void LootBeam::QueueBeacon(const float pos[3], float alphaScale)
     {
-        const gfx::Depth depth = style_.throughWalls ? gfx::Depth::Through : gfx::Depth::Tested;
+        beacon_gfx::SetDepth(style_.throughWalls ? gfx::Depth::Through : gfx::Depth::Tested);
 
         float groundZ = pos[2];
         if (!world::GroundZ(pos[0], pos[1], pos[2], groundZ))
             groundZ = pos[2];
 
         if (style_.showGround)
-            QueueGroundGlow(pos, style_, alphaScale, depth);
+            QueueGroundGlow(pos, style_, alphaScale);
 
         if (style_.showBeam && style_.height > 0.01f)
-            QueueBeamColumn(pos, groundZ, style_, alphaScale, depth);
+            QueueBeamColumn(pos, groundZ, style_, alphaScale);
     }
 
     void LootBeam::OnWorldEnter(const ev::WorldEnterArgs& a)
@@ -775,7 +780,7 @@ namespace wxl::scripts::loot_beam
         inWorld_    = false;
         beaconCount_ = 0;
         trackedCount_ = 0;
-        gfx::Clear();
+        beacon_gfx::Clear();
     }
 
     void LootBeam::OnUpdate(const ev::UpdateArgs& a)
@@ -787,7 +792,7 @@ namespace wxl::scripts::loot_beam
         // One frame's worth of shapes only. The flush below empties the queue on the normal path, but
         // a frame that never reached the world scene pass would otherwise leave its shapes to pile up
         // under the next one.
-        gfx::Clear();
+        beacon_gfx::Clear();
 
         // Derive the world state live rather than trusting OnWorldEnter alone: a module loaded after
         // the client was already in-world would otherwise never see the enter event and stay dark.
@@ -844,7 +849,7 @@ namespace wxl::scripts::loot_beam
     {
         if (!style_.enabled || !inWorld_ || beaconCount_ == 0)
         {
-            gfx::Clear();
+            beacon_gfx::Clear();
             return;
         }
 
@@ -886,8 +891,8 @@ namespace wxl::scripts::loot_beam
                 proj[10] > 0.0f && proj[10] < 1.0f ? -proj[14] / (proj[10] - 1.0f) : -1.0f);
         }
 
-        const size_t queued = gfx::Pending();
-        const long   result = gfx::Flush(dev, a.sceneDepth);
+        const size_t queued = beacon_gfx::Pending();
+        const long   result = beacon_gfx::Draw(dev, a.sceneDepth);
 
         if (!loggedFirstFlush_)
         {
