@@ -15,7 +15,22 @@ is turned on.
   and its core whiter;
 - the whole thing breathes slowly and eases in and out, so a live beacon never reads as scenery;
 - colour, size, height, opacity, range, pulse and fade are all tunable from the in-game overlay panel
-  under **Loot Beam**.
+  under **Loot Beam**;
+- with **Colour by loot rarity** on (the default), a corpse whose loot is known glows in the quality
+  colour of its best item -- green for a green, purple for an epic -- instead of the default gold.
+
+## Loot rarity colour
+
+The beacon is tinted with the best item quality in the corpse's loot, using the game's own quality
+colours (poor grey, common white, uncommon green, rare blue, epic purple, legendary orange, artifact
+gold). A body whose loot is not known keeps the configured `Color`.
+
+The 3.3.5a client only receives a corpse's loot when loot is requested for it -- normally the loot
+window opening -- so on a stock server the quality colour appears once you have opened that body. The
+module reads the loot the client already holds (via the client's own `GetNumLootItems` /
+`GetLootSlotInfo` script functions) and caches the best quality against the corpse's GUID; a server
+that sends loot ahead of the window will colour the beam before you open it. Turn **Colour by loot
+rarity** off (or set `LootColor=0`) to use a single fixed tint.
 
 ## How it works
 
@@ -55,6 +70,7 @@ with the defaults on first load.
 | `ThroughWalls` | draw through terrain and walls (off by default, so the world occludes the beam) |
 | `WidthPerYard` | minimum beam half-width per yard of camera distance |
 | `RequireLootable` | only beam corpses the server still flags lootable (default on) |
+| `LootColor` | tint a known corpse by its best loot quality (default on) instead of `Color` |
 
 ## Notes
 
@@ -62,5 +78,7 @@ with the defaults on first load.
   flags `UNIT_DYNFLAG_LOOTABLE`, so once you loot one the flag clears and the beacon goes away. Set it
   to 0 to mark every dead NPC instead. If the flags field cannot be trusted on a given client build it
   falls back to the health-only verdict rather than turning into noise.
+- Loot quality is only known for a body the client has been sent loot for (see above). The module does
+  not request loot itself: it never talks to the server and never opens the loot window.
 - Player corpses are left alone -- this marks NPC bodies.
 - Purely visual and client-side: the server never learns the beams exist.

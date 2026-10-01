@@ -23,9 +23,10 @@
 #include <string>
 
 // World-space beacon over lootable corpses. It never touches a raw client address for anything the SDK
-// models: the object walk, the unit position and the drawing all go through wxl::game, and the only
-// two layout numbers the module carries -- the descriptor pointer and the health field -- live in
-// UnitFields.hpp.
+// models: the object walk, the unit position and the drawing all go through wxl::game, the loot's
+// contents are read through the client's own script functions, and the only raw addresses the module
+// carries -- the descriptor pointer and the two unit fields in UnitFields.hpp, and the live-loot GUID
+// in LootFields.hpp -- are the ones the SDK does not model.
 //
 // The beacon is queued the same frame it is decided, on the logic tick, and handed to the draw at
 // OnWorldSceneEnd, which is the one slot where geometry placed by world coordinate lands where its
@@ -61,6 +62,12 @@ namespace wxl::scripts::loot_beam
         // true (the default) marks only corpses the server still flags lootable, so an already-looted
         // body goes dark; false marks every dead NPC.
         bool  requireLootable = true;
+
+        // true (the default) tints a corpse's beacon with the quality colour of the best item its loot
+        // is known to hold, and falls back to Color / the panel's tint while that loot is unknown. The
+        // 3.3.5a client only learns a corpse's loot when loot is requested for it, so the tint appears
+        // once the body has been opened.
+        bool  lootColor = true;
     };
 
     class LootBeam final : public wxl::ext::EventScript
@@ -97,9 +104,11 @@ namespace wxl::scripts::loot_beam
 
         // --- steps ---
         int  ScanUnits();                       // mark tracked beacons seen this frame; returns units seen
+        void ScanLoot();                        // adopt the open loot's best quality onto its corpse
+        int  ReadLootQuality();                 // best item quality in the currently open loot, or -1
         void UpdateFade(float dt);              // advance each beacon's fade; drop the dead ones
         void DumpUnit(void* unit, unsigned long long guid); // one-shot descriptor window for debugging
-        void QueueBeacon(const float pos[3], float alphaScale); // ground glow + beam into the gfx queue
+        void QueueBeacon(const float pos[3], float alphaScale, const float rgb[3]); // glow + beam
         void LoadConfigNow();
         void ReloadConfigIfChanged();
         void Log(int level, const char* fmt, ...) const;
@@ -109,6 +118,7 @@ namespace wxl::scripts::loot_beam
             unsigned long long guid = 0;
             float              pos[3] = {};
             float              fade   = 0.0f; // 0..1 opacity multiplier, eased over fadeIn/fadeOut
+            int                quality = -1;  // best loot quality seen for this corpse, -1 until known
             bool               seen   = false;
         };
 
@@ -118,6 +128,8 @@ namespace wxl::scripts::loot_beam
 
         BeamStyle      style_{};
         BeamStyle      saved_{}; // what the INI holds, for the unsaved-changes test
+        unsigned long long lootGuid_    = 0;  // GUID of the loot the cached quality belongs to
+        int                lootQuality_ = -1; // its best item quality, recomputed when the GUID changes
         std::string    iniPath_;
         unsigned long long configStamp_ = 0;
         bool           inWorld_ = false;

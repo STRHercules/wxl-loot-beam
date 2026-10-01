@@ -16,11 +16,13 @@
 
 #include "LootBeam.hpp"
 #include "BeaconRenderer.hpp"
+#include "LootFields.hpp"
 #include "UnitFields.hpp"
 
 #include "game/Camera.hpp"
 #include "game/Gfx.hpp"
 #include "game/Pick.hpp"
+#include "game/Script.hpp"
 #include "game/World.hpp"
 
 #include <windows.h>
@@ -38,6 +40,7 @@ namespace wxl::scripts::loot_beam
     namespace gx    = wxl::game::gx;
     namespace world = wxl::game::world;
     namespace cam   = wxl::game::camera;
+    namespace script = wxl::game::script;
 
     namespace
     {
@@ -77,6 +80,19 @@ namespace wxl::scripts::loot_beam
             __try
             {
                 out = *reinterpret_cast<const uintptr_t*>(address);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        bool ReadU64(uintptr_t address, unsigned long long& out)
+        {
+            __try
+            {
+                out = *reinterpret_cast<const unsigned long long*>(address);
                 return true;
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
@@ -251,7 +267,7 @@ namespace wxl::scripts::loot_beam
                    a.fadeIn == b.fadeIn && a.fadeOut == b.fadeOut &&
                    a.maxDistance == b.maxDistance && a.showGround == b.showGround &&
                    a.showBeam == b.showBeam && a.throughWalls == b.throughWalls &&
-                   a.requireLootable == b.requireLootable;
+                   a.requireLootable == b.requireLootable && a.lootColor == b.lootColor;
         }
     }
 
@@ -314,6 +330,7 @@ namespace wxl::scripts::loot_beam
         s.showBeam       = ReadBool(iniPath_,  "ShowBeam",      s.showBeam);
         s.throughWalls   = ReadBool(iniPath_,  "ThroughWalls",  s.throughWalls);
         s.requireLootable= ReadBool(iniPath_,  "RequireLootable", s.requireLootable);
+        s.lootColor      = ReadBool(iniPath_,  "LootColor",       s.lootColor);
         ReadColor(iniPath_, "Color", s.color);
 
         // A file written by an older build carries a distance cap and the wrong idea of depth, so a
@@ -390,6 +407,7 @@ namespace wxl::scripts::loot_beam
         WriteInt(iniPath_,   "ShowBeam",        style_.showBeam ? 1 : 0);
         WriteInt(iniPath_,   "ThroughWalls",    style_.throughWalls ? 1 : 0);
         WriteInt(iniPath_,   "RequireLootable", style_.requireLootable ? 1 : 0);
+        WriteInt(iniPath_,   "LootColor",       style_.lootColor ? 1 : 0);
         WriteColor(iniPath_, "Color",           style_.color);
         WriteInt(iniPath_,   "ConfigVersion",   kConfigVersion);
 
@@ -459,6 +477,8 @@ namespace wxl::scripts::loot_beam
             if (api.UiCheckbox("Through walls", &walls)) style_.throughWalls = walls != 0;
             int lootable = style_.requireLootable ? 1 : 0;
             if (api.UiCheckbox("Only lootable corpses", &lootable)) style_.requireLootable = lootable != 0;
+            int lootColor = style_.lootColor ? 1 : 0;
+            if (api.UiCheckbox("Colour by loot rarity", &lootColor)) style_.lootColor = lootColor != 0;
         }
 
         api.UiSeparator();
@@ -527,6 +547,7 @@ namespace wxl::scripts::loot_beam
                 b = &beacons_[trackedCount_++];
                 b->guid = guid;
                 b->fade = 0.0f;
+                b->quality = -1;
             }
             b->pos[0] = p[0];
             b->pos[1] = p[1];
@@ -536,6 +557,99 @@ namespace wxl::scripts::loot_beam
         });
 
         return enumerated;
+    }
+
+    namespace
+    {
+        // The standard item-quality tints, indexed by quality 0 (poor) through 7 (heirloom). Kept as
+        // the exact game colours so a beam matches the item link the loot window shows.
+        const float kQualityColor[8][3] = {
+            { 0.62f, 0.62f, 0.62f }, // 0 poor      #9D9D9D
+            { 1.00f, 1.00f, 1.00f }, // 1 common    #FFFFFF
+            { 0.12f, 1.00f, 0.00f }, // 2 uncommon  #1EFF00
+            { 0.00f, 0.44f, 0.87f }, // 3 rare      #0070DD
+            { 0.64f, 0.21f, 0.93f }, // 4 epic      #A335EE
+            { 1.00f, 0.50f, 0.00f }, // 5 legendary #FF8000
+            { 0.90f, 0.80f, 0.50f }, // 6 artifact  #E6CC80
+            { 0.00f, 0.80f, 1.00f }, // 7 heirloom  #00CCFF
+        };
+    }
+
+    // Reads the loot the client currently holds and, when it belongs to a tracked corpse, records the
+    // best item quality on that beacon. The client keeps one loot at a time and only learns a corpse's
+    // contents when loot is requested for it, so the quality is adopted the moment the loot opens and
+    // kept on the tracked beacon afterwards.
+    void LootBeam::ScanLoot()
+    {
+        if (!style_.lootColor)
+        {
+            lootGuid_    = 0;
+            lootQuality_ = -1;
+            return;
+        }
+
+        unsigned long long guid = 0;
+        if (!ReadU64(kLootSourceGuid, guid))
+        {
+            lootGuid_    = 0;
+            lootQuality_ = -1;
+            return;
+        }
+
+        if (guid != lootGuid_)
+        {
+            lootGuid_    = guid;
+            lootQuality_ = guid != 0 ? ReadLootQuality() : -1;
+            if (guid != 0)
+                Log(WXL_LOG_INFO, "loot: source=%llX bestQuality=%d", guid, lootQuality_);
+        }
+
+        if (lootQuality_ < 0) return;
+        for (int i = 0; i < trackedCount_; ++i)
+        {
+            if (beacons_[i].guid == lootGuid_)
+                beacons_[i].quality = lootQuality_;
+        }
+    }
+
+    // The best item quality in the currently open loot, asked of the client itself (GetNumLootItems /
+    // GetLootSlotInfo) so no item-cache offset is reimplemented here. Returns -1 when there is no loot
+    // or the script state is not up; a slot whose fourth return is not a number contributes nothing.
+    int LootBeam::ReadLootQuality()
+    {
+        void* state = script::Context();
+        if (!state) return -1;
+
+        const int base = script::StackTop(state);
+        int       best = -1;
+
+        script::PushGlobal(state, "GetNumLootItems");
+        if (script::PCall(state, 0, 1, 0) == 0)
+        {
+            int count = int(script::ToNumber(state, -1));
+            script::SetTop(state, base);
+            if (count < 0) count = 0;
+            if (count > kMaxLootSlots) count = kMaxLootSlots;
+
+            for (int slot = 1; slot <= count; ++slot)
+            {
+                script::PushGlobal(state, "GetLootSlotInfo");
+                script::PushNumber(state, double(slot));
+                // texture, item, quantity, quality, locked
+                if (script::PCall(state, 1, 5, 0) == 0)
+                {
+                    const int quality = int(script::ToNumber(state, -2));
+                    if (quality > best) best = quality;
+                }
+                script::SetTop(state, base);
+            }
+        }
+        else
+        {
+            script::SetTop(state, base);
+        }
+
+        return best;
     }
 
     // Advances every tracked beacon's fade toward its target -- full when it was seen this frame, zero
@@ -771,20 +885,27 @@ namespace wxl::scripts::loot_beam
         }
     }
 
-    void LootBeam::QueueBeacon(const float pos[3], float alphaScale)
+    void LootBeam::QueueBeacon(const float pos[3], float alphaScale, const float rgb[3])
     {
-        beacon_gfx::SetDepth(style_.throughWalls ? gfx::Depth::Through : gfx::Depth::Tested);
+        // The tint is per-beacon now, so it is applied to a copy the two shape builders read exactly
+        // as before rather than threading a colour through both of them.
+        BeamStyle style = style_;
+        style.color[0] = rgb[0];
+        style.color[1] = rgb[1];
+        style.color[2] = rgb[2];
+
+        beacon_gfx::SetDepth(style.throughWalls ? gfx::Depth::Through : gfx::Depth::Tested);
 
         // The body is on the ground, so its own position is the height the shaft rises from. Only the
         // pool needs a ground query, because it follows the terrain away from the body; using a query
         // for the shaft too risked a bad hit on a lower surface burying it under the rendered terrain.
         const float baseZ = pos[2];
 
-        if (style_.showGround)
-            QueueGroundGlow(pos, style_, alphaScale);
+        if (style.showGround)
+            QueueGroundGlow(pos, style, alphaScale);
 
-        if (style_.showBeam && style_.height > 0.01f)
-            QueueBeamColumn(pos, baseZ, style_, alphaScale);
+        if (style.showBeam && style.height > 0.01f)
+            QueueBeamColumn(pos, baseZ, style, alphaScale);
     }
 
     void LootBeam::OnWorldEnter(const ev::WorldEnterArgs& a)
@@ -824,6 +945,7 @@ namespace wxl::scripts::loot_beam
         }
 
         const int enumerated = ScanUnits();
+        ScanLoot();
         UpdateFade(a.dt);
         if (beaconCount_ == 0)
         {
@@ -859,7 +981,9 @@ namespace wxl::scripts::loot_beam
         for (int i = 0; i < trackedCount_; ++i)
         {
             if (beacons_[i].fade <= 0.001f) continue;
-            QueueBeacon(beacons_[i].pos, pulseScale * beacons_[i].fade);
+            const int    q   = beacons_[i].quality;
+            const float* rgb = (style_.lootColor && q >= 0) ? kQualityColor[q > 7 ? 7 : q] : style_.color;
+            QueueBeacon(beacons_[i].pos, pulseScale * beacons_[i].fade, rgb);
         }
     }
 
