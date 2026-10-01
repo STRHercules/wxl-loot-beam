@@ -40,18 +40,15 @@ namespace wxl::scripts::loot_beam::beacon_gfx
     void SetDepth(wxl::game::gfx::Depth depth);
 
     ///
-    /// How far, in yards, to pull every queued shape toward the camera along its own view ray.
+    /// The depth bias applied while testing against the scene, in depth-buffer units.
     ///
-    /// At range the terrain the client renders (its LOD) sits above the collision height a
-    /// ground-projected shape was placed on, so an exact depth test hides it except up close. Moving a
-    /// point along the ray from the eye to it keeps that point on the same screen pixel and only
-    /// changes its depth; pulling every vertex in by a small, real distance therefore outruns the LOD
-    /// without letting the beacon through anything that is genuinely nearer. 0 disables the pull.
+    /// A beacon placed on a ground height sampled from the collision mesh sits at a slightly different
+    /// depth than the terrain the client actually renders at range (its LOD), so an unbiased test can
+    /// lose at a distance. D3D's slope-scaled + constant depth bias pulls it toward the camera in depth
+    /// only -- no vertex moves, so the beacon never leaves its world position or its screen pixel. 0
+    /// disables it.
     ///
-    /// @param yards    constant pull applied at every distance.
-    /// @param perYard  extra pull per yard of camera distance, for error that grows with range.
-    ///
-    void SetPush(float yards, float perYard);
+    void SetDepthBias(float bias);
 
     /// Queues a triangle with an independent colour at each vertex (Gouraud-interpolated).
     void Triangle(const float a[3], const float b[3], const float c[3],

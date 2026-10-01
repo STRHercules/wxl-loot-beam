@@ -18,7 +18,7 @@
 
 #include "game/Camera.hpp"
 
-#include <cmath>
+#include <cstring>
 #include <vector>
 
 namespace wxl::scripts::loot_beam::beacon_gfx
@@ -33,19 +33,27 @@ namespace wxl::scripts::loot_beam::beacon_gfx
         static_assert(sizeof(Vertex) == 16, "Vertex must match the declared vertex format stride");
 
         std::vector<Vertex> g_vertices;
-        gfx::Depth          g_depth = gfx::Depth::Tested;
-        float               g_push       = 0.0f;
-        float               g_pushPerYard = 0.0f;
+        gfx::Depth          g_depth     = gfx::Depth::Tested;
+        float               g_depthBias = 1.0f;
 
         // D3DBLEND_ONE. The SDK names only the two source-over factors it needs; additive is the whole
         // point here, so the constant is carried locally rather than widening the core's enum.
         constexpr unsigned kBlendOne = 2;
+
+        // D3DRS_SLOPESCALEDEPTHBIAS (175) and D3DRS_DEPTHBIAS (195): public D3D9 states the gx facade
+        // does not name. Their value is a float, so it is passed through as its bit pattern. A negative
+        // bias pulls geometry toward the camera in depth only -- it never moves a vertex, which is what
+        // makes it the right tool for keeping the beacon off the terrain LOD it was placed on.
+        constexpr unsigned kSlopeScaleBiasState = 175;
+        constexpr unsigned kDepthBiasState      = 195;
+        inline unsigned F2DW(float f) { unsigned u = 0; std::memcpy(&u, &f, sizeof(u)); return u; }
 
         constexpr unsigned kTouchedStates[] = {
             gx::rs::kZEnable, gx::rs::kShadeMode, gx::rs::kZWrite, gx::rs::kAlphaTest,
             gx::rs::kSrcBlend, gx::rs::kDestBlend, gx::rs::kCullMode, gx::rs::kZFunc,
             gx::rs::kAlphaBlend, gx::rs::kFogEnable, gx::rs::kStencilEnable,
             gx::rs::kLighting, gx::rs::kColorWrite, gx::rs::kScissorTest,
+            kSlopeScaleBiasState, kDepthBiasState,
         };
         constexpr size_t kTouchedStateCount = sizeof(kTouchedStates) / sizeof(kTouchedStates[0]);
 
@@ -60,11 +68,7 @@ namespace wxl::scripts::loot_beam::beacon_gfx
     void Clear() { g_vertices.clear(); }
     size_t Pending() { return g_vertices.size() / 3; }
     void SetDepth(gfx::Depth depth) { g_depth = depth; }
-    void SetPush(float yards, float perYard)
-    {
-        g_push        = yards    > 0.0f ? yards    : 0.0f;
-        g_pushPerYard = perYard  > 0.0f ? perYard  : 0.0f;
-    }
+    void SetDepthBias(float bias) { g_depthBias = bias > 0.0f ? bias : 0.0f; }
 
     void Triangle(const float a[3], const float b[3], const float c[3],
                   gfx::Color ca, gfx::Color cb, gfx::Color cc)
@@ -128,29 +132,6 @@ namespace wxl::scripts::loot_beam::beacon_gfx
         float eye[3];
         cam::GetPosition(eye);
 
-        // Pull every vertex toward the eye along its own ray. A point moved along the ray keeps its
-        // screen pixel and only loses depth, so this is a distance (yards the terrain LOD can differ
-        // by) rather than a depth-buffer unit -- and it cannot reorder the beacon against anything more
-        // than `push` yards nearer than it.
-        if (g_push > 0.0f || g_pushPerYard > 0.0f)
-        {
-            for (Vertex& v : g_vertices)
-            {
-                const float dx = v.x - eye[0];
-                const float dy = v.y - eye[1];
-                const float dz = v.z - eye[2];
-                const float dist = sqrtf(dx * dx + dy * dy + dz * dz);
-                if (dist <= 1.0e-3f) continue;
-
-                float near = dist - (g_push + g_pushPerYard * dist);
-                if (near < dist * 0.25f) near = dist * 0.25f; // never cross the eye
-                const float s = near / dist;
-                v.x = eye[0] + dx * s;
-                v.y = eye[1] + dy * s;
-                v.z = eye[2] + dz * s;
-            }
-        }
-
         const float toCameraOrigin[16] = {
             1.0f,    0.0f,    0.0f,    0.0f,
             0.0f,    1.0f,    0.0f,    0.0f,
@@ -182,11 +163,17 @@ namespace wxl::scripts::loot_beam::beacon_gfx
         if (g_depth == gfx::Depth::Through)
         {
             dev.SetRenderState(gx::rs::kZEnable, 0);
+            dev.SetRenderState(kSlopeScaleBiasState, F2DW(0.0f));
+            dev.SetRenderState(kDepthBiasState,      F2DW(0.0f));
         }
         else
         {
             dev.SetRenderState(gx::rs::kZEnable, 1);
             dev.SetRenderState(gx::rs::kZFunc, gx::cmp::kLessEqual);
+            // Pull the beacon toward the camera in depth only, so the terrain LOD it was placed on
+            // cannot win the test. The view transform is untouched, so this cannot move it on screen.
+            dev.SetRenderState(kSlopeScaleBiasState, F2DW(-g_depthBias));
+            dev.SetRenderState(kDepthBiasState,      F2DW(-g_depthBias));
         }
 
         const long result = dev.DrawPrimitiveUP(gx::prim::kTriangleList,
