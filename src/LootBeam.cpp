@@ -251,6 +251,7 @@ namespace wxl::scripts::loot_beam
                    a.fadeIn == b.fadeIn && a.fadeOut == b.fadeOut &&
                    a.maxDistance == b.maxDistance && a.showGround == b.showGround &&
                    a.showBeam == b.showBeam && a.throughWalls == b.throughWalls &&
+                   a.depthPush == b.depthPush &&
                    a.requireLootable == b.requireLootable;
         }
     }
@@ -313,6 +314,7 @@ namespace wxl::scripts::loot_beam
         s.showGround     = ReadBool(iniPath_,  "ShowGround",    s.showGround);
         s.showBeam       = ReadBool(iniPath_,  "ShowBeam",      s.showBeam);
         s.throughWalls   = ReadBool(iniPath_,  "ThroughWalls",  s.throughWalls);
+        s.depthPush      = ReadFloat(iniPath_, "DepthPush",     s.depthPush,     0.0f, 6.0f);
         s.requireLootable= ReadBool(iniPath_,  "RequireLootable", s.requireLootable);
         ReadColor(iniPath_, "Color", s.color);
 
@@ -389,6 +391,7 @@ namespace wxl::scripts::loot_beam
         WriteInt(iniPath_,   "ShowGround",      style_.showGround ? 1 : 0);
         WriteInt(iniPath_,   "ShowBeam",        style_.showBeam ? 1 : 0);
         WriteInt(iniPath_,   "ThroughWalls",    style_.throughWalls ? 1 : 0);
+        WriteFloat(iniPath_, "DepthPush",       style_.depthPush);
         WriteInt(iniPath_,   "RequireLootable", style_.requireLootable ? 1 : 0);
         WriteColor(iniPath_, "Color",           style_.color);
         WriteInt(iniPath_,   "ConfigVersion",   kConfigVersion);
@@ -457,6 +460,8 @@ namespace wxl::scripts::loot_beam
             if (api.UiCheckbox("Beam", &beam)) style_.showBeam = beam != 0;
             int walls = style_.throughWalls ? 1 : 0;
             if (api.UiCheckbox("Through walls", &walls)) style_.throughWalls = walls != 0;
+            if (!style_.throughWalls)
+                api.UiSliderFloat("Depth push (yd)", &style_.depthPush, 0.0f, 4.0f);
             int lootable = style_.requireLootable ? 1 : 0;
             if (api.UiCheckbox("Only lootable corpses", &lootable)) style_.requireLootable = lootable != 0;
         }
@@ -770,6 +775,7 @@ namespace wxl::scripts::loot_beam
     void LootBeam::QueueBeacon(const float pos[3], float alphaScale)
     {
         beacon_gfx::SetDepth(style_.throughWalls ? gfx::Depth::Through : gfx::Depth::Tested);
+        beacon_gfx::SetPush(style_.throughWalls ? 0.0f : style_.depthPush);
 
         float groundZ = pos[2];
         if (!world::GroundZ(pos[0], pos[1], pos[2], groundZ))

@@ -39,6 +39,17 @@ namespace wxl::scripts::loot_beam::beacon_gfx
     /// The depth mode every queued shape is drawn with. Set once per frame before queueing.
     void SetDepth(wxl::game::gfx::Depth depth);
 
+    ///
+    /// How far, in yards, to pull every queued shape toward the camera along its own view ray.
+    ///
+    /// At range the terrain the client renders (its LOD) sits above the collision height a
+    /// ground-projected shape was placed on, so an exact depth test hides it except up close. Moving a
+    /// point along the ray from the eye to it keeps that point on the same screen pixel and only
+    /// changes its depth; pulling every vertex in by a small, real distance therefore outruns the LOD
+    /// without letting the beacon through anything that is genuinely nearer. 0 disables the pull.
+    ///
+    void SetPush(float yards);
+
     /// Queues a triangle with an independent colour at each vertex (Gouraud-interpolated).
     void Triangle(const float a[3], const float b[3], const float c[3],
                   wxl::game::gfx::Color ca, wxl::game::gfx::Color cb, wxl::game::gfx::Color cc);

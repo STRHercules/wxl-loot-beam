@@ -18,6 +18,7 @@
 
 #include "game/Camera.hpp"
 
+#include <cmath>
 #include <vector>
 
 namespace wxl::scripts::loot_beam::beacon_gfx
@@ -33,6 +34,7 @@ namespace wxl::scripts::loot_beam::beacon_gfx
 
         std::vector<Vertex> g_vertices;
         gfx::Depth          g_depth = gfx::Depth::Tested;
+        float               g_push  = 0.0f;
 
         // D3DBLEND_ONE. The SDK names only the two source-over factors it needs; additive is the whole
         // point here, so the constant is carried locally rather than widening the core's enum.
@@ -57,6 +59,7 @@ namespace wxl::scripts::loot_beam::beacon_gfx
     void Clear() { g_vertices.clear(); }
     size_t Pending() { return g_vertices.size() / 3; }
     void SetDepth(gfx::Depth depth) { g_depth = depth; }
+    void SetPush(float yards) { g_push = yards > 0.0f ? yards : 0.0f; }
 
     void Triangle(const float a[3], const float b[3], const float c[3],
                   gfx::Color ca, gfx::Color cb, gfx::Color cc)
@@ -119,6 +122,30 @@ namespace wxl::scripts::loot_beam::beacon_gfx
         // world-space vertex has to be moved to that origin or it projects thousands of units away.
         float eye[3];
         cam::GetPosition(eye);
+
+        // Pull every vertex toward the eye along its own ray. A point moved along the ray keeps its
+        // screen pixel and only loses depth, so this is a distance (yards the terrain LOD can differ
+        // by) rather than a depth-buffer unit -- and it cannot reorder the beacon against anything more
+        // than `push` yards nearer than it.
+        if (g_push > 0.0f)
+        {
+            for (Vertex& v : g_vertices)
+            {
+                const float dx = v.x - eye[0];
+                const float dy = v.y - eye[1];
+                const float dz = v.z - eye[2];
+                const float dist = sqrtf(dx * dx + dy * dy + dz * dz);
+                if (dist <= 1.0e-3f) continue;
+
+                float near = dist - g_push;
+                if (near < dist * 0.25f) near = dist * 0.25f; // never cross the eye
+                const float s = near / dist;
+                v.x = eye[0] + dx * s;
+                v.y = eye[1] + dy * s;
+                v.z = eye[2] + dz * s;
+            }
+        }
+
         const float toCameraOrigin[16] = {
             1.0f,    0.0f,    0.0f,    0.0f,
             0.0f,    1.0f,    0.0f,    0.0f,
