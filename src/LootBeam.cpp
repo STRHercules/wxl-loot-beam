@@ -230,6 +230,7 @@ namespace wxl::scripts::loot_beam
         {
             return a.enabled == b.enabled && a.height == b.height &&
                    a.groundRadius == b.groundRadius && a.beamWidth == b.beamWidth &&
+                   a.widthPerYard == b.widthPerYard &&
                    a.color[0] == b.color[0] && a.color[1] == b.color[1] && a.color[2] == b.color[2] &&
                    a.groundAlpha == b.groundAlpha && a.ringAlpha == b.ringAlpha &&
                    a.beamAlpha == b.beamAlpha && a.pulse == b.pulse && a.pulseSpeed == b.pulseSpeed &&
@@ -279,6 +280,7 @@ namespace wxl::scripts::loot_beam
         s.height         = ReadFloat(iniPath_, "Height",        s.height,        0.0f, 40.0f);
         s.groundRadius   = ReadFloat(iniPath_, "GroundRadius",  s.groundRadius,  0.2f, 6.0f);
         s.beamWidth      = ReadFloat(iniPath_, "BeamWidth",     s.beamWidth,     0.05f, 2.0f);
+        s.widthPerYard   = ReadFloat(iniPath_, "WidthPerYard",  s.widthPerYard,  0.0f, 0.05f);
         s.groundAlpha    = ReadFloat(iniPath_, "GroundAlpha",   s.groundAlpha,   0.0f, 1.0f);
         s.ringAlpha      = ReadFloat(iniPath_, "RingAlpha",     s.ringAlpha,     0.0f, 1.0f);
         s.beamAlpha      = ReadFloat(iniPath_, "BeamAlpha",     s.beamAlpha,     0.0f, 1.0f);
@@ -324,6 +326,7 @@ namespace wxl::scripts::loot_beam
         WriteFloat(iniPath_, "Height",          style_.height);
         WriteFloat(iniPath_, "GroundRadius",    style_.groundRadius);
         WriteFloat(iniPath_, "BeamWidth",       style_.beamWidth);
+        WriteFloat(iniPath_, "WidthPerYard",    style_.widthPerYard);
         WriteFloat(iniPath_, "GroundAlpha",     style_.groundAlpha);
         WriteFloat(iniPath_, "RingAlpha",       style_.ringAlpha);
         WriteFloat(iniPath_, "BeamAlpha",       style_.beamAlpha);
@@ -372,6 +375,7 @@ namespace wxl::scripts::loot_beam
             api.UiSliderFloat("Height (yd)", &style_.height, 0.0f, 40.0f);
             api.UiSliderFloat("Ground radius (yd)", &style_.groundRadius, 0.2f, 6.0f);
             api.UiSliderFloat("Beam width (yd)", &style_.beamWidth, 0.05f, 2.0f);
+            api.UiSliderFloat("Min width / yd", &style_.widthPerYard, 0.0f, 0.05f);
             api.UiSliderFloat("Ground alpha", &style_.groundAlpha, 0.0f, 1.0f);
             api.UiSliderFloat("Ring alpha", &style_.ringAlpha, 0.0f, 1.0f);
             api.UiSliderFloat("Beam alpha", &style_.beamAlpha, 0.0f, 1.0f);
@@ -519,9 +523,15 @@ namespace wxl::scripts::loot_beam
         const float dx = camera[0] - pos[0];
         const float dy = camera[1] - pos[1];
         const float len = sqrtf(dx * dx + dy * dy);
+        const float dz = camera[2] - pos[2];
+        const float dist = sqrtf(dx * dx + dy * dy + dz * dz);
         float fx = 1.0f, fy = 0.0f;
         if (len > 1e-3f) { fx = dx / len; fy = dy / len; }
         const float sx = -fy, sy = fx;
+
+        // A fixed-width beam becomes a sub-pixel thread at range; grow a floor under the half-width
+        // so a distant corpse still shows a column. 0 disables it and leaves the taper alone.
+        const float minHalfWidth = style_.widthPerYard > 0.0f ? style_.widthPerYard * dist : 0.0f;
 
         const float baseZ = groundZ + 0.05f;
         const float topZ  = groundZ + style_.height;
@@ -538,10 +548,12 @@ namespace wxl::scripts::loot_beam
                 const float t1 = float(r + 1) / float(kRings);
                 const float z0 = baseZ + (topZ - baseZ) * t0;
                 const float z1 = baseZ + (topZ - baseZ) * t1;
-                const float w0 = style_.beamWidth * (1.0f - 0.65f * t0);
-                const float w1 = style_.beamWidth * (1.0f - 0.65f * t1);
-                const float a0 = style_.beamAlpha * (1.0f - t0) * pulseScale;
-                const float a1 = style_.beamAlpha * (1.0f - t1) * pulseScale;
+                const float w0 = fmaxf(style_.beamWidth * (1.0f - 0.65f * t0), minHalfWidth);
+                const float w1 = fmaxf(style_.beamWidth * (1.0f - 0.65f * t1), minHalfWidth);
+                // Keep a floor under the top alpha as well: a column that fades to nothing well below
+                // its stated height reads as a short beam however tall it really is.
+                const float a0 = style_.beamAlpha * (1.0f - 0.65f * t0) * pulseScale;
+                const float a1 = style_.beamAlpha * (1.0f - 0.65f * t1) * pulseScale;
 
                 const float p0[3] = { pos[0] - ax * w0, pos[1] - ay * w0, z0 };
                 const float p1[3] = { pos[0] + ax * w0, pos[1] + ay * w0, z0 };

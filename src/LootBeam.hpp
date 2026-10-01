@@ -39,19 +39,21 @@ namespace wxl::scripts::loot_beam
         bool  enabled        = true;   // master switch
         float height         = 15.0f;  // how far the beam rises, yards (the "15 metres" of the brief)
         float groundRadius   = 1.70f;  // radius of the glow painted on the ground, yards
-        float beamWidth      = 0.50f;  // half-width of the beam at its base, yards
+        float beamWidth      = 0.70f;  // half-width of the beam at its base, yards
+        float widthPerYard   = 0.010f; // minimum half-width per yard of camera distance (0 = off); a
+                                       // beam that never thins with distance stays a legible column
         float color[3]       = { 1.00f, 0.82f, 0.42f }; // warm gold
 
         float groundAlpha    = 0.45f;  // opacity of the filled ground disc
         float ringAlpha      = 0.90f;  // opacity of the bright ground ring
-        float beamAlpha      = 0.45f;  // opacity of the beam at its base
+        float beamAlpha      = 0.60f;  // opacity of the beam at its base
         float pulse          = 0.20f;  // slow breathing depth, 0 = steady
         float pulseSpeed     = 1.60f;  // breathing rate
 
-        float maxDistance    = 80.0f;  // ignore corpses farther than this, yards (0 = unlimited)
+        float maxDistance    = 0.0f;   // ignore corpses farther than this, yards (0 = unlimited)
         bool  showGround     = true;   // paint the glow on the ground
         bool  showBeam       = true;   // raise the beam
-        bool  throughWalls   = false;  // draw through terrain (a marker you can always find) or not
+        bool  throughWalls   = true;   // draw through terrain (a marker you can always find) or not
 
         // false (the default) marks every dead NPC; true additionally requires the server's
         // UNIT_DYNFLAG_LOOTABLE bit, so an already-looted corpse goes dark.
