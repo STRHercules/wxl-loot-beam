@@ -242,7 +242,7 @@ namespace wxl::scripts::loot_beam
 
         bool SameStyle(const BeamStyle& a, const BeamStyle& b)
         {
-            return a.enabled == b.enabled && a.height == b.height &&
+            return a.enabled == b.enabled && a.height == b.height && a.baseOffset == b.baseOffset &&
                    a.groundRadius == b.groundRadius && a.beamWidth == b.beamWidth &&
                    a.widthPerYard == b.widthPerYard &&
                    a.color[0] == b.color[0] && a.color[1] == b.color[1] && a.color[2] == b.color[2] &&
@@ -288,10 +288,10 @@ namespace wxl::scripts::loot_beam
         }
 
         Log(WXL_LOG_INFO,
-            "config: throughWalls=%d maxDistance=%.0f height=%.0f beamWidth=%.2f widthPerYard=%.3f "
-            "beamAlpha=%.2f",
-            style_.throughWalls ? 1 : 0, style_.maxDistance, style_.height, style_.beamWidth,
-            style_.widthPerYard, style_.beamAlpha);
+            "config: throughWalls=%d maxDistance=%.0f height=%.0f baseOffset=%.2f beamWidth=%.2f "
+            "widthPerYard=%.3f beamAlpha=%.2f",
+            style_.throughWalls ? 1 : 0, style_.maxDistance, style_.height, style_.baseOffset,
+            style_.beamWidth, style_.widthPerYard, style_.beamAlpha);
     }
 
     void LootBeam::LoadConfigNow()
@@ -301,6 +301,7 @@ namespace wxl::scripts::loot_beam
         s.height         = ReadFloat(iniPath_, "Height",        s.height,        0.0f, 40.0f);
         s.groundRadius   = ReadFloat(iniPath_, "GroundRadius",  s.groundRadius,  0.2f, 6.0f);
         s.beamWidth      = ReadFloat(iniPath_, "BeamWidth",     s.beamWidth,     0.05f, 2.0f);
+        s.baseOffset     = ReadFloat(iniPath_, "BaseOffset",    s.baseOffset,    0.0f, 10.0f);
         s.widthPerYard   = ReadFloat(iniPath_, "WidthPerYard",  s.widthPerYard,  0.0f, 0.05f);
         s.groundAlpha    = ReadFloat(iniPath_, "GroundAlpha",   s.groundAlpha,   0.0f, 1.0f);
         s.beamAlpha      = ReadFloat(iniPath_, "BeamAlpha",     s.beamAlpha,     0.0f, 1.0f);
@@ -373,6 +374,7 @@ namespace wxl::scripts::loot_beam
         WriteFloat(iniPath_, "Height",          style_.height);
         WriteFloat(iniPath_, "GroundRadius",    style_.groundRadius);
         WriteFloat(iniPath_, "BeamWidth",       style_.beamWidth);
+        WriteFloat(iniPath_, "BaseOffset",      style_.baseOffset);
         WriteFloat(iniPath_, "WidthPerYard",    style_.widthPerYard);
         WriteFloat(iniPath_, "GroundAlpha",     style_.groundAlpha);
         WriteFloat(iniPath_, "BeamAlpha",       style_.beamAlpha);
@@ -424,6 +426,7 @@ namespace wxl::scripts::loot_beam
             api.UiSliderFloat("Height (yd)", &style_.height, 0.0f, 40.0f);
             api.UiSliderFloat("Ground radius (yd)", &style_.groundRadius, 0.2f, 6.0f);
             api.UiSliderFloat("Beam width (yd)", &style_.beamWidth, 0.05f, 2.0f);
+            api.UiSliderFloat("Base offset (yd)", &style_.baseOffset, 0.0f, 5.0f);
             api.UiSliderFloat("Min width / yd", &style_.widthPerYard, 0.0f, 0.05f);
             api.UiSliderFloat("Ground alpha", &style_.groundAlpha, 0.0f, 1.0f);
             api.UiSliderFloat("Beam alpha", &style_.beamAlpha, 0.0f, 1.0f);
@@ -611,6 +614,16 @@ namespace wxl::scripts::loot_beam
             return 1.0f - a * a * (3.0f - 2.0f * a);
         }
 
+        // The shaft's vertical profile: transparent where it leaves the body, rising to a soft peak a
+        // short way up, then easing to nothing at the top. A profile that were merely brightest at the
+        // bottom would read as a column with a cut-off base instead of light gathering in the air.
+        float BeamVertical(float t)
+        {
+            constexpr float kRise = 0.22f;
+            if (t < kRise) return 1.0f - SoftEdge(t / kRise);
+            return SoftEdge((t - kRise) / (1.0f - kRise));
+        }
+
         // The tint, pulled toward white by `whiten`: the middle of a light shaft is hotter and whiter
         // than its cooler, more coloured edges.
         gfx::Color PackTint(float alpha, const float rgb[3], float whiten)
@@ -685,9 +698,9 @@ namespace wxl::scripts::loot_beam
         }
 
         // The shaft: one camera-facing billboard, gridded so a colour can sit on every vertex. The
-        // horizontal falloff keeps the core bright and the edges transparent; the vertical one is strong
-        // at the base and eases to nothing at the top. Interpolated across the grid, a few quads read as
-        // a soft, hot-cored volume.
+        // horizontal falloff keeps the core bright and the edges transparent; the vertical one is
+        // transparent at the floating base, peaks just above it, then eases to nothing at the top.
+        // Interpolated across the grid, a few quads read as a soft, hot-cored volume.
         void QueueBeamColumn(const float pos[3], float groundZ, const BeamStyle& style, float alphaScale)
         {
             float camera[3];
@@ -710,8 +723,8 @@ namespace wxl::scripts::loot_beam
             constexpr int kRows = 8;
             constexpr int kCols = 4;
 
-            const float baseZ = groundZ + 0.05f;
-            const float topZ  = groundZ + style.height;
+            const float baseZ = groundZ + style.baseOffset;
+            const float topZ  = groundZ + fmaxf(style.height, style.baseOffset + 0.1f);
 
             float      xs[kRows + 1][kCols + 1];
             float      ys[kRows + 1][kCols + 1];
@@ -722,7 +735,7 @@ namespace wxl::scripts::loot_beam
             {
                 const float t = float(r) / float(kRows);
                 const float w = fmaxf(style.beamWidth * (1.0f - 0.55f * t), minHalfWidth);
-                const float v = powf(1.0f - t, 1.3f);
+                const float v = BeamVertical(t);
                 zs[r] = baseZ + (topZ - baseZ) * t;
 
                 for (int c = 0; c <= kCols; ++c)

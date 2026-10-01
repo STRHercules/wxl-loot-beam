@@ -38,6 +38,8 @@ namespace wxl::scripts::loot_beam
     {
         bool  enabled        = true;   // master switch
         float height         = 15.0f;  // how far the beam rises, yards (the "15 metres" of the brief)
+        float baseOffset     = 1.0f;   // how far above the body the shaft begins, yards; it fades in
+                                       // from transparent there, so it gathers out of the air
         float groundRadius   = 1.70f;  // radius of the glow painted on the ground, yards
         float beamWidth      = 0.70f;  // half-width of the beam at its base, yards
         float widthPerYard   = 0.010f; // minimum half-width per yard of camera distance (0 = off); a

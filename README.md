@@ -9,8 +9,9 @@ by default -- tall enough to spot over a hill or through a crowd, short enough t
 than a light show.
 
 - a soft pool of light on the terrain, falling off smoothly from a hot centre rather than a flat circle;
-- a camera-facing shaft rises from it, bright at the base and fading to nothing at the top, with a
-  horizontal falloff that keeps its edges soft and its core whiter;
+- a camera-facing shaft rises a little above the body and fades in from transparent there, peaking a
+  short way up and easing to nothing at the top, with a horizontal falloff that keeps its edges soft
+  and its core whiter;
 - the whole thing breathes slowly and eases in and out, so a live beacon never reads as scenery;
 - colour, size, height, opacity, range, pulse and fade are all tunable from the in-game overlay panel
   under **Loot Beam**.
@@ -41,6 +42,7 @@ with the defaults on first load.
 | Key | Meaning |
 |---|---|
 | `Height` | how far the beam rises, yards (default 15) |
+| `BaseOffset` | how far above the body the shaft begins, yards (default 1) |
 | `GroundRadius` | radius of the glow on the ground |
 | `BeamWidth` | half-width of the beam at its base |
 | `GroundAlpha`, `BeamAlpha` | opacity of the ground glow and the beam |
