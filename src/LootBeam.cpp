@@ -251,7 +251,6 @@ namespace wxl::scripts::loot_beam
                    a.fadeIn == b.fadeIn && a.fadeOut == b.fadeOut &&
                    a.maxDistance == b.maxDistance && a.showGround == b.showGround &&
                    a.showBeam == b.showBeam && a.throughWalls == b.throughWalls &&
-                   a.depthBias == b.depthBias &&
                    a.requireLootable == b.requireLootable;
         }
     }
@@ -314,7 +313,6 @@ namespace wxl::scripts::loot_beam
         s.showGround     = ReadBool(iniPath_,  "ShowGround",    s.showGround);
         s.showBeam       = ReadBool(iniPath_,  "ShowBeam",      s.showBeam);
         s.throughWalls   = ReadBool(iniPath_,  "ThroughWalls",  s.throughWalls);
-        s.depthBias      = ReadFloat(iniPath_, "DepthBias",     s.depthBias,     0.0f, 16.0f);
         s.requireLootable= ReadBool(iniPath_,  "RequireLootable", s.requireLootable);
         ReadColor(iniPath_, "Color", s.color);
 
@@ -391,7 +389,6 @@ namespace wxl::scripts::loot_beam
         WriteInt(iniPath_,   "ShowGround",      style_.showGround ? 1 : 0);
         WriteInt(iniPath_,   "ShowBeam",        style_.showBeam ? 1 : 0);
         WriteInt(iniPath_,   "ThroughWalls",    style_.throughWalls ? 1 : 0);
-        WriteFloat(iniPath_, "DepthBias",       style_.depthBias);
         WriteInt(iniPath_,   "RequireLootable", style_.requireLootable ? 1 : 0);
         WriteColor(iniPath_, "Color",           style_.color);
         WriteInt(iniPath_,   "ConfigVersion",   kConfigVersion);
@@ -460,8 +457,6 @@ namespace wxl::scripts::loot_beam
             if (api.UiCheckbox("Beam", &beam)) style_.showBeam = beam != 0;
             int walls = style_.throughWalls ? 1 : 0;
             if (api.UiCheckbox("Through walls", &walls)) style_.throughWalls = walls != 0;
-            if (!style_.throughWalls)
-                api.UiSliderFloat("Depth bias", &style_.depthBias, 0.0f, 16.0f);
             int lootable = style_.requireLootable ? 1 : 0;
             if (api.UiCheckbox("Only lootable corpses", &lootable)) style_.requireLootable = lootable != 0;
         }
@@ -779,7 +774,6 @@ namespace wxl::scripts::loot_beam
     void LootBeam::QueueBeacon(const float pos[3], float alphaScale)
     {
         beacon_gfx::SetDepth(style_.throughWalls ? gfx::Depth::Through : gfx::Depth::Tested);
-        beacon_gfx::SetDepthBias(style_.throughWalls ? 0.0f : style_.depthBias);
 
         // The body is on the ground, so its own position is the height the shaft rises from. Only the
         // pool needs a ground query, because it follows the terrain away from the body; using a query

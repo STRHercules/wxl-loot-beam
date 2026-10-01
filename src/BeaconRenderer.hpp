@@ -39,17 +39,6 @@ namespace wxl::scripts::loot_beam::beacon_gfx
     /// The depth mode every queued shape is drawn with. Set once per frame before queueing.
     void SetDepth(wxl::game::gfx::Depth depth);
 
-    ///
-    /// The depth bias applied while testing against the scene, in depth-buffer units.
-    ///
-    /// A beacon placed on a ground height sampled from the collision mesh sits at a slightly different
-    /// depth than the terrain the client actually renders at range (its LOD), so an unbiased test can
-    /// lose at a distance. D3D's slope-scaled + constant depth bias pulls it toward the camera in depth
-    /// only -- no vertex moves, so the beacon never leaves its world position or its screen pixel. 0
-    /// disables it.
-    ///
-    void SetDepthBias(float bias);
-
     /// Queues a triangle with an independent colour at each vertex (Gouraud-interpolated).
     void Triangle(const float a[3], const float b[3], const float c[3],
                   wxl::game::gfx::Color ca, wxl::game::gfx::Color cb, wxl::game::gfx::Color cc);

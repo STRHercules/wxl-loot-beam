@@ -18,7 +18,6 @@
 
 #include "game/Camera.hpp"
 
-#include <cstring>
 #include <vector>
 
 namespace wxl::scripts::loot_beam::beacon_gfx
@@ -33,8 +32,7 @@ namespace wxl::scripts::loot_beam::beacon_gfx
         static_assert(sizeof(Vertex) == 16, "Vertex must match the declared vertex format stride");
 
         std::vector<Vertex> g_vertices;
-        gfx::Depth          g_depth     = gfx::Depth::Tested;
-        float               g_depthBias = 1.0f;
+        gfx::Depth          g_depth = gfx::Depth::Tested;
 
         // D3DBLEND_ONE. The SDK names only the two source-over factors it needs; additive is the whole
         // point here, so the constant is carried locally rather than widening the core's enum.
@@ -42,20 +40,11 @@ namespace wxl::scripts::loot_beam::beacon_gfx
         // D3DCMP_GREATEREQUAL. Absent from the gx constants, which only ever needed the standard one.
         constexpr unsigned kGreaterEqual = 7;
 
-        // D3DRS_SLOPESCALEDEPTHBIAS (175) and D3DRS_DEPTHBIAS (195): public D3D9 states the gx facade
-        // does not name. Their value is a float, so it is passed through as its bit pattern. A negative
-        // bias pulls geometry toward the camera in depth only -- it never moves a vertex, which is what
-        // makes it the right tool for keeping the beacon off the terrain LOD it was placed on.
-        constexpr unsigned kSlopeScaleBiasState = 175;
-        constexpr unsigned kDepthBiasState      = 195;
-        inline unsigned F2DW(float f) { unsigned u = 0; std::memcpy(&u, &f, sizeof(u)); return u; }
-
         constexpr unsigned kTouchedStates[] = {
             gx::rs::kZEnable, gx::rs::kShadeMode, gx::rs::kZWrite, gx::rs::kAlphaTest,
             gx::rs::kSrcBlend, gx::rs::kDestBlend, gx::rs::kCullMode, gx::rs::kZFunc,
             gx::rs::kAlphaBlend, gx::rs::kFogEnable, gx::rs::kStencilEnable,
             gx::rs::kLighting, gx::rs::kColorWrite, gx::rs::kScissorTest,
-            kSlopeScaleBiasState, kDepthBiasState,
         };
         constexpr size_t kTouchedStateCount = sizeof(kTouchedStates) / sizeof(kTouchedStates[0]);
 
@@ -70,7 +59,6 @@ namespace wxl::scripts::loot_beam::beacon_gfx
     void Clear() { g_vertices.clear(); }
     size_t Pending() { return g_vertices.size() / 3; }
     void SetDepth(gfx::Depth depth) { g_depth = depth; }
-    void SetDepthBias(float bias) { g_depthBias = bias > 0.0f ? bias : 0.0f; }
 
     void Triangle(const float a[3], const float b[3], const float c[3],
                   gfx::Color ca, gfx::Color cb, gfx::Color cc)
@@ -165,8 +153,6 @@ namespace wxl::scripts::loot_beam::beacon_gfx
         if (g_depth == gfx::Depth::Through)
         {
             dev.SetRenderState(gx::rs::kZEnable, 0);
-            dev.SetRenderState(kSlopeScaleBiasState, F2DW(0.0f));
-            dev.SetRenderState(kDepthBiasState,      F2DW(0.0f));
         }
         else
         {
@@ -177,14 +163,12 @@ namespace wxl::scripts::loot_beam::beacon_gfx
             // beacon where it should show and showing it where something should hide it.
             const bool reversed = (-projection[14] * projection[11]) < 0.0f;
 
+            // A plain depth test, with no D3D9 depth bias. DEPTHBIAS is not measured in depth-buffer
+            // LSbs: on DXVK (this client's d3d9 shim) a value of 1.0 scales to ~2^23 and offsets the
+            // fragment by essentially the whole depth range, which pulled the beacon in front of every
+            // wall. The scene's own depth is what hides it; leave it unmodified.
             dev.SetRenderState(gx::rs::kZEnable, 1);
             dev.SetRenderState(gx::rs::kZFunc, reversed ? kGreaterEqual : gx::cmp::kLessEqual);
-            // Pull the beacon toward the camera in depth only, so the terrain LOD it was placed on
-            // cannot win the test. The view transform is untouched, so this cannot move it on screen.
-            // Toward the camera is a smaller depth in standard Z and a larger one when reversed.
-            const float bias = reversed ? g_depthBias : -g_depthBias;
-            dev.SetRenderState(kSlopeScaleBiasState, F2DW(bias));
-            dev.SetRenderState(kDepthBiasState,      F2DW(bias));
         }
 
         const long result = dev.DrawPrimitiveUP(gx::prim::kTriangleList,

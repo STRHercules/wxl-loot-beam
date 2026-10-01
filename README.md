@@ -53,7 +53,6 @@ with the defaults on first load.
 | `MaxDistance` | ignore corpses beyond this range (0 = unlimited) |
 | `ShowGround`, `ShowBeam` | keep just one half of the marker |
 | `ThroughWalls` | draw through terrain and walls (off by default, so the world occludes the beam) |
-| `DepthBias` | slope-scaled depth bias keeping the beacon off the terrain LOD it sits on (0 = off) |
 | `WidthPerYard` | minimum beam half-width per yard of camera distance |
 | `RequireLootable` | only beam corpses the server still flags lootable (default on) |
 
