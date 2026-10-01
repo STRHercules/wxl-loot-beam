@@ -39,6 +39,8 @@ namespace wxl::scripts::loot_beam::beacon_gfx
         // D3DBLEND_ONE. The SDK names only the two source-over factors it needs; additive is the whole
         // point here, so the constant is carried locally rather than widening the core's enum.
         constexpr unsigned kBlendOne = 2;
+        // D3DCMP_GREATEREQUAL. Absent from the gx constants, which only ever needed the standard one.
+        constexpr unsigned kGreaterEqual = 7;
 
         // D3DRS_SLOPESCALEDEPTHBIAS (175) and D3DRS_DEPTHBIAS (195): public D3D9 states the gx facade
         // does not name. Their value is a float, so it is passed through as its bit pattern. A negative
@@ -168,12 +170,21 @@ namespace wxl::scripts::loot_beam::beacon_gfx
         }
         else
         {
+            // Which end of the depth range is near is a property of the client's projection, not a
+            // constant: standard depth maps near to 0 and wants LessEqual, a reversed-Z projection maps
+            // near to 1 and wants GreaterEqual. d(ndcZ)/d(viewZ) is -proj[14]*proj[11], so its sign
+            // says which one this is -- and using the wrong one inverts the whole test, hiding the
+            // beacon where it should show and showing it where something should hide it.
+            const bool reversed = (-projection[14] * projection[11]) < 0.0f;
+
             dev.SetRenderState(gx::rs::kZEnable, 1);
-            dev.SetRenderState(gx::rs::kZFunc, gx::cmp::kLessEqual);
+            dev.SetRenderState(gx::rs::kZFunc, reversed ? kGreaterEqual : gx::cmp::kLessEqual);
             // Pull the beacon toward the camera in depth only, so the terrain LOD it was placed on
             // cannot win the test. The view transform is untouched, so this cannot move it on screen.
-            dev.SetRenderState(kSlopeScaleBiasState, F2DW(-g_depthBias));
-            dev.SetRenderState(kDepthBiasState,      F2DW(-g_depthBias));
+            // Toward the camera is a smaller depth in standard Z and a larger one when reversed.
+            const float bias = reversed ? g_depthBias : -g_depthBias;
+            dev.SetRenderState(kSlopeScaleBiasState, F2DW(bias));
+            dev.SetRenderState(kDepthBiasState,      F2DW(bias));
         }
 
         const long result = dev.DrawPrimitiveUP(gx::prim::kTriangleList,
