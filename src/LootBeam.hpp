@@ -116,6 +116,7 @@ namespace wxl::scripts::loot_beam
         // One-shot diagnostics: each fires once and then stays quiet.
         bool           loggedFirstScan_  = false;
         bool           loggedFirstFlush_ = false;
+        bool           loggedClipDiag_   = false;
         int            emptyFrameStreak_ = 0;
         int            emptyWarnings_    = 0;
     };

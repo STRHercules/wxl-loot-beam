@@ -45,6 +45,9 @@ namespace wxl::scripts::loot_beam
         constexpr const char* kIniSection = "LootBeam";
         constexpr float       kTwoPi      = 6.28318530717959f;
         constexpr float       kUnitToByte = 255.0f;
+        // Bumped when a shipped default changes in a way an existing file must adopt. A file older
+        // than this has its stale distance/depth keys replaced with the always-visible defaults.
+        constexpr int         kConfigVersion = 2;
 
         // Descriptor reads are guarded: a wrong field index or a half-built object reads a nearby heap
         // dword. The validators reject an address that cannot be a live block before the SEH frame is
@@ -271,6 +274,12 @@ namespace wxl::scripts::loot_beam
             SaveConfig();
             Log(WXL_LOG_INFO, "wrote default config to %s", iniPath_.c_str());
         }
+
+        Log(WXL_LOG_INFO,
+            "config: throughWalls=%d maxDistance=%.0f height=%.0f beamWidth=%.2f widthPerYard=%.3f "
+            "beamAlpha=%.2f",
+            style_.throughWalls ? 1 : 0, style_.maxDistance, style_.height, style_.beamWidth,
+            style_.widthPerYard, style_.beamAlpha);
     }
 
     void LootBeam::LoadConfigNow()
@@ -293,8 +302,27 @@ namespace wxl::scripts::loot_beam
         s.requireLootable= ReadBool(iniPath_,  "RequireLootable", s.requireLootable);
         ReadColor(iniPath_, "Color", s.color);
 
+        // A file written by an older build carries a distance cap and a depth-tested beacon that made
+        // it visible only up close. Adopt the always-visible defaults for exactly those keys and
+        // persist them, so an existing install does not have to be edited by hand.
+        const int version = GetPrivateProfileIntA(kIniSection, "ConfigVersion", 0, iniPath_.c_str());
+        const bool migrated = version < kConfigVersion;
+        if (migrated)
+        {
+            s.maxDistance = 0.0f;
+            s.throughWalls = true;
+            if (s.beamWidth < 0.7f) s.beamWidth = 0.7f;
+            if (s.beamAlpha < 0.6f) s.beamAlpha = 0.6f;
+        }
+
         style_ = s;
         saved_ = s;
+
+        if (migrated)
+        {
+            Log(WXL_LOG_INFO, "migrating config from version %d to %d", version, kConfigVersion);
+            SaveConfig();
+        }
     }
 
     void LootBeam::ReloadConfigIfChanged()
@@ -338,6 +366,7 @@ namespace wxl::scripts::loot_beam
         WriteInt(iniPath_,   "ThroughWalls",    style_.throughWalls ? 1 : 0);
         WriteInt(iniPath_,   "RequireLootable", style_.requireLootable ? 1 : 0);
         WriteColor(iniPath_, "Color",           style_.color);
+        WriteInt(iniPath_,   "ConfigVersion",   kConfigVersion);
 
         // The write bumps the file stamp; adopt it so the self-write is not mistaken for an external
         // edit (which would overwrite a panel tweak made right after Save).
@@ -645,6 +674,36 @@ namespace wxl::scripts::loot_beam
         }
 
         gx::Device9 dev(a.device);
+
+        // One-shot: where the first beacon lands in clip space, so a beacon that draws only up close
+        // can be told apart from one the far plane or an off-screen projection is rejecting.
+        if (!loggedClipDiag_)
+        {
+            loggedClipDiag_ = true;
+            float eye[3];
+            cam::GetPosition(eye);
+            const float* view = cam::GetView();
+            const float* proj = cam::GetProjection();
+            const float px = beacons_[0].pos[0] - eye[0];
+            const float py = beacons_[0].pos[1] - eye[1];
+            const float pz = beacons_[0].pos[2] - eye[2];
+            const float vx = px * view[0] + py * view[4] + pz * view[8] + view[12];
+            const float vy = px * view[1] + py * view[5] + pz * view[9] + view[13];
+            const float vz = px * view[2] + py * view[6] + pz * view[10] + view[14];
+            const float cx = vx * proj[0] + vy * proj[4] + vz * proj[8] + proj[12];
+            const float cy = vx * proj[1] + vy * proj[5] + vz * proj[9] + proj[13];
+            const float cz = vx * proj[2] + vy * proj[6] + vz * proj[10] + proj[14];
+            const float cw = vx * proj[3] + vy * proj[7] + vz * proj[11] + proj[15];
+            const float dist = sqrtf(px * px + py * py + pz * pz);
+            Log(WXL_LOG_INFO,
+                "diag: beacon0=(%.0f,%.0f,%.0f) eye=(%.0f,%.0f,%.0f) dist=%.1f viewZ=%.1f "
+                "ndc=(%.2f,%.2f,%.2f) w=%.1f projFar=%.0f",
+                beacons_[0].pos[0], beacons_[0].pos[1], beacons_[0].pos[2], eye[0], eye[1], eye[2],
+                dist, vz, cw != 0.0f ? cx / cw : 0.0f, cw != 0.0f ? cy / cw : 0.0f,
+                cw != 0.0f ? cz / cw : 0.0f, cw,
+                proj[10] > 0.0f && proj[10] < 1.0f ? -proj[14] / (proj[10] - 1.0f) : -1.0f);
+        }
+
         const size_t queued = gfx::Pending();
         const long   result = gfx::Flush(dev, a.sceneDepth);
 
