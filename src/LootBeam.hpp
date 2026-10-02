@@ -34,6 +34,30 @@
 // Nothing is retained: an enemy that stops being dead stops having a beam with no cleanup.
 namespace wxl::scripts::loot_beam
 {
+    // The beam categories a corpse's loot can fall into. The first is a body whose loot held only
+    // money (no gear to colour by); the rest are the game's item qualities in quality order, so a
+    // quality q maps to tier q + kTierPoor. A beacon whose tier is switched off is not drawn at all.
+    enum GearTier
+    {
+        kTierCurrency = 0, // money-only loot (server hint 9)
+        kTierPoor,         // quality 0  grey
+        kTierCommon,       // quality 1  white
+        kTierUncommon,     // quality 2  green
+        kTierRare,         // quality 3  blue
+        kTierEpic,         // quality 4  purple
+        kTierLegendary,    // quality 5  orange
+        kTierArtifact,     // quality 6  gold
+        kTierHeirloom,     // quality 7  cyan
+        kTierCount
+    };
+
+    /** @brief One tier's look: whether it is drawn at all, and the colour it is drawn in. */
+    struct TierStyle
+    {
+        bool  enabled = true;
+        float color[3] = { 1.0f, 1.0f, 1.0f };
+    };
+
     /** @brief User-tunable look, read from wxl-loot-beam.ini beside the DLL. */
     struct BeamStyle
     {
@@ -45,7 +69,23 @@ namespace wxl::scripts::loot_beam
         float beamWidth      = 0.70f;  // half-width of the beam at its base, yards
         float widthPerYard   = 0.010f; // minimum half-width per yard of camera distance (0 = off); a
                                        // beam that never thins with distance stays a legible column
-        float color[3]       = { 1.00f, 0.82f, 0.42f }; // warm gold
+        float color[3]       = { 1.00f, 0.82f, 0.42f }; // warm gold; the fallback while a body's
+                                                       // loot (and so its tier) is not yet known
+
+        // Per-tier tint and on/off. Indexed by GearTier; the defaults below are the game's own item
+        // quality colours, with the money-only "currency" tier given a bright gold of its own. A tier
+        // switched off produces no beacon for corpses that fall into it.
+        TierStyle tiers[kTierCount] = {
+            { true, { 1.00f, 0.82f, 0.00f } }, // kTierCurrency
+            { true, { 0.62f, 0.62f, 0.62f } }, // kTierPoor
+            { true, { 1.00f, 1.00f, 1.00f } }, // kTierCommon
+            { true, { 0.12f, 1.00f, 0.00f } }, // kTierUncommon
+            { true, { 0.00f, 0.44f, 0.87f } }, // kTierRare
+            { true, { 0.64f, 0.21f, 0.93f } }, // kTierEpic
+            { true, { 1.00f, 0.50f, 0.00f } }, // kTierLegendary
+            { true, { 0.90f, 0.80f, 0.50f } }, // kTierArtifact
+            { true, { 0.00f, 0.80f, 1.00f } }, // kTierHeirloom
+        };
 
         float groundAlpha    = 0.45f;  // opacity of the filled ground glow at its centre
         float beamAlpha      = 0.60f;  // opacity of the beam at its base
@@ -57,7 +97,9 @@ namespace wxl::scripts::loot_beam
         float maxDistance    = 0.0f;   // ignore corpses farther than this, yards (0 = unlimited)
         bool  showGround     = true;   // paint the glow on the ground
         bool  showBeam       = true;   // raise the beam
-        bool  throughWalls   = false;  // let the world occlude the beacon (default) or draw it through walls
+        // Draw the beacon through terrain and walls (the default), so a corpse tucked behind a rise is
+        // never missed. Turn it off to let the world occlude the marker as real light would.
+        bool  throughWalls   = true;
 
         // true (the default) marks only corpses the server still flags lootable, so an already-looted
         // body goes dark; false marks every dead NPC.
@@ -68,6 +110,12 @@ namespace wxl::scripts::loot_beam
         // 3.3.5a client only learns a corpse's loot when loot is requested for it, so the tint appears
         // once the body has been opened.
         bool  lootColor = true;
+
+        // true (the default) prefers the quality the server put on the corpse (see UnitFields.hpp /
+        // the companion AzerothCore module) over the loot the client discovers for itself. That lets
+        // the beacon be the right colour the moment the body dies, without waiting for the loot
+        // window. When the server sends no hint the local loot is used as before.
+        bool  serverColor = true;
     };
 
     class LootBeam final : public wxl::ext::EventScript
@@ -105,7 +153,7 @@ namespace wxl::scripts::loot_beam
         // --- steps ---
         int  ScanUnits();                       // mark tracked beacons seen this frame; returns units seen
         void ScanLoot();                        // adopt the open loot's best quality onto its corpse
-        int  ReadLootQuality();                 // best item quality in the currently open loot, or -1
+        int  ReadLootTier();                    // GearTier of the currently open loot, or -1
         void UpdateFade(float dt);              // advance each beacon's fade; drop the dead ones
         void DumpUnit(void* unit, unsigned long long guid); // one-shot descriptor window for debugging
         void QueueBeacon(const float pos[3], float alphaScale, const float rgb[3]); // glow + beam
@@ -118,7 +166,8 @@ namespace wxl::scripts::loot_beam
             unsigned long long guid = 0;
             float              pos[3] = {};
             float              fade   = 0.0f; // 0..1 opacity multiplier, eased over fadeIn/fadeOut
-            int                quality = -1;  // best loot quality seen for this corpse, -1 until known
+            int                tier = -1;     // GearTier of the corpse's loot, -1 until known
+            bool               serverTint = false; // tier came from the server, not the open loot
             bool               seen   = false;
         };
 
@@ -128,8 +177,8 @@ namespace wxl::scripts::loot_beam
 
         BeamStyle      style_{};
         BeamStyle      saved_{}; // what the INI holds, for the unsaved-changes test
-        unsigned long long lootGuid_    = 0;  // GUID of the loot the cached quality belongs to
-        int                lootQuality_ = -1; // its best item quality, recomputed when the GUID changes
+        unsigned long long lootGuid_    = 0;  // GUID of the loot the cached tier belongs to
+        int                lootTier_    = -1; // its GearTier, recomputed when the GUID changes
         std::string    iniPath_;
         unsigned long long configStamp_ = 0;
         bool           inWorld_ = false;
@@ -140,6 +189,7 @@ namespace wxl::scripts::loot_beam
         bool           loggedFirstScan_  = false;
         bool           loggedFirstFlush_ = false;
         bool           loggedClipDiag_   = false;
+        bool           loggedServerHint_ = false;
         int            emptyFrameStreak_ = 0;
         int            emptyWarnings_    = 0;
     };

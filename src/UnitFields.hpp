@@ -53,6 +53,25 @@ namespace wxl_loot_beam
     /// corpse can still be looted and clears once it has been.
     constexpr size_t kUnitDynamicFlagsField = 0x13C;
 
+    /// UNIT_FIELD_PADDING: absolute field index 0x93 -> byte 0x24C. The 3.3.5a reserved unit slot;
+    /// this client never consumes it for a creature, it is inside UNIT_END (so it stays in the
+    /// descriptor block) and it is sent as a public field, which makes it the channel a server uses
+    /// to hand the eye a value the game has no use for.
+    ///
+    /// The companion AzerothCore module (mod-loot-beam) writes the best item quality in the corpse's
+    /// loot here as quality + 1 (0 = no hint), so the beacon can be tinted before the loot window is
+    /// opened. Only values 1..kLootBeamQualityMax + 1 are accepted; anything else is read as no hint.
+    constexpr size_t kUnitLootBeamField = 0x24C;
+
+    /// The largest quality the field may carry, mirrored from the client's own quality table. A
+    /// quality q is stored as q + 1, so this corresponds to a stored value of 8. A value above this
+    /// that is not the currency hint below is ignored rather than indexed out of bounds.
+    constexpr uint32_t kLootBeamQualityMax = 7;
+
+    /// A corpse whose loot held money but no gear has no quality to describe it; the server flags it
+    /// with this value instead (quality max + 2, leaving a gap after the quality range).
+    constexpr uint32_t kLootBeamCurrencyHint = kLootBeamQualityMax + 2; // 9
+
     /// UNIT_DYNFLAG_LOOTABLE, the bit the client sets while a corpse can still be looted.
     constexpr uint32_t kDynamicFlagLootable = 0x0001;
 
