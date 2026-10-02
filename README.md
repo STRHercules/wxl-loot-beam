@@ -62,6 +62,18 @@ A tier switched off produces **no beacon at all** for corpses whose best loot fa
 can hide e.g. currency-only or uncommon bodies and keep the rest. The defaults are the game's own
 quality colours; a body whose loot (and so tier) is not known still uses `Color`.
 
+## Server module
+
+The companion AzerothCore module lives in this repo under `server/mod-loot-beam/`. Copy that whole
+folder into your server's `modules/` directory so it becomes `<azerothcore>/modules/mod-loot-beam/`,
+then rebuild `worldserver`; the module loader picks it up automatically (no core edits needed). It
+adds one setting, `LootBeam.Enable` (default 1), to `mod_loot_beam.conf`.
+
+The server half is optional. Without it the module still colours a corpse from the loot the client
+learns when the window opens; with it the colour -- including the money-only `Currency` tier -- is
+known the instant the body dies. The server never reads anything from the client: it only writes the
+corpse's own best-loot quality back onto that corpse.
+
 ## How it works
 
 Every frame the module walks the resident unit objects through the SDK's object enumerator, drops any
