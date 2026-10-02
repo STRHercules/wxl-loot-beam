@@ -4,9 +4,9 @@ itself from across the camp.
 
 The beam is capped at 15 yards by default -- tall enough to spot across a camp, short enough to stay a
 marker rather than a light show. It breathes slowly so a live beacon never reads as scenery, and the
-glow hugs the terrain so it lies flat on a slope. It also sits in the world rather than over it: trees,
-walls and other players hide it, exactly as they hide anything else -- turn on **Through walls** if you
-would rather it always show.
+glow hugs the terrain so it lies flat on a slope. It draws through terrain and walls by default, so a
+body tucked behind a rise is never missed; turn **Through walls** off if you would rather the world
+hide it like anything else.
 
 **Every knob is live-tunable** from the in-game overlay panel or from `wxl-loot-beam.ini` next to the
 DLL: height, base offset, width, ground radius, colour, opacity, pulse, range, and whether the world is
@@ -14,5 +14,11 @@ allowed to hide it. Want only the ground halo, or only the beam? Turn the other 
 leave already-looted bodies dark? Enable **Only lootable corpses** and the beacon disappears the moment
 the body is emptied.
 
-Purely visual and entirely client-side -- the server never learns the beams exist, and nothing is
-retained once a corpse stops counting.
+Each gear tier -- currency, poor, common, uncommon, rare, epic, legendary, artifact and heirloom -- has
+its own colour and its own on/off switch under **Gear tiers**, so you can recolour them to taste or
+hide entire tiers (say, no beam for currency-only or uncommon corpses) while keeping the rest.
+
+Purely visual and entirely client-side: the module sends nothing to the server, and on a stock realm
+nothing is retained once a corpse stops counting. Run the companion **mod-loot-beam** server module and
+the beacon is tinted by the server's own view of the corpse's best loot -- green for a green, purple for
+an epic -- the instant the body dies, before the loot window is ever opened.

@@ -6,8 +6,8 @@ Hunting for the body you just killed means squinting at a pile of grey models an
 **Loot Beam** puts a warm glow on the ground and a beam of light rising straight up from every NPC body
 that can still be looted, so the one worth walking to announces itself. The beam is capped at 15 yards
 by default -- tall enough to spot across a camp or clear a low rise, short enough to stay a marker
-rather than a light show. It is occluded by the world like any other geometry, unless **Through walls**
-is turned on.
+rather than a light show. It draws through terrain and walls by default, so a body tucked behind a rise
+is never missed; turn **Through walls** off to let the world occlude it like any other geometry.
 
 - a soft pool of light on the terrain, falling off smoothly from a hot centre rather than a flat circle;
 - a camera-facing shaft rises a little above the body and fades in from transparent there, peaking a
@@ -28,9 +28,39 @@ gold). A body whose loot is not known keeps the configured `Color`.
 The 3.3.5a client only receives a corpse's loot when loot is requested for it -- normally the loot
 window opening -- so on a stock server the quality colour appears once you have opened that body. The
 module reads the loot the client already holds (via the client's own `GetNumLootItems` /
-`GetLootSlotInfo` script functions) and caches the best quality against the corpse's GUID; a server
-that sends loot ahead of the window will colour the beam before you open it. Turn **Colour by loot
-rarity** off (or set `LootColor=0`) to use a single fixed tint.
+`GetLootSlotInfo` script functions) and caches the best quality against the corpse's GUID.
+
+### Server-driven colour
+
+To colour a beam the moment the body dies -- before anyone opens it -- run the companion
+**mod-loot-beam** module on the AzerothCore server. At creature death the server has just rolled the
+corpse's loot, so it computes the best item quality in it and writes that back onto the corpse's own
+`UNIT_FIELD_PADDING` update field as `quality + 1` (0 means "no hint"; 9 means the loot held money but
+no gear, the `Currency` tier). The client reads that field straight out of the object it is already
+walking, so the beacon is the right colour immediately and no custom opcode, addon message or client
+patch is involved.
+
+This is opt-in on the client too: with **Prefer server loot colour** on (the default, `ServerColor=1`)
+the server's quality wins over the loot the client discovers for itself; with it off the module
+ignores the field and behaves exactly as it did before. On a server that does not run the module the
+field stays 0 and the client falls back to its own loot, so nothing needs changing.
+
+Turn **Colour by loot rarity** off (or set `LootColor=0`) to use a single fixed tint; that disables
+the server colour as well.
+
+### Gear tiers
+
+Every beam belongs to a **tier**, and each tier has its own colour and an on/off switch, both live in
+the panel's **Gear tiers** section (and the `Tier.*` keys in the INI):
+
+| Tier | Meaning |
+|---|---|
+| `Currency` | the corpse's loot held money but no gear (server-flagged; the client cannot tell on its own) |
+| `Poor` .. `Heirloom` | the best item quality in the loot: 0 grey, 1 white, 2 green, 3 blue, 4 purple, 5 orange, 6 artifact, 7 heirloom |
+
+A tier switched off produces **no beacon at all** for corpses whose best loot falls into it, so you
+can hide e.g. currency-only or uncommon bodies and keep the rest. The defaults are the game's own
+quality colours; a body whose loot (and so tier) is not known still uses `Color`.
 
 ## How it works
 
@@ -67,10 +97,12 @@ with the defaults on first load.
 | `FadeIn`, `FadeOut` | seconds to ease a beacon in on appear / out on loot (0 = instant) |
 | `MaxDistance` | ignore corpses beyond this range (0 = unlimited) |
 | `ShowGround`, `ShowBeam` | keep just one half of the marker |
-| `ThroughWalls` | draw through terrain and walls (off by default, so the world occludes the beam) |
+| `ThroughWalls` | draw through terrain and walls (on by default, so a rise cannot hide the beacon) |
 | `WidthPerYard` | minimum beam half-width per yard of camera distance |
 | `RequireLootable` | only beam corpses the server still flags lootable (default on) |
 | `LootColor` | tint a known corpse by its best loot quality (default on) instead of `Color` |
+| `ServerColor` | prefer the quality the server puts on the corpse (default on) over the locally read loot |
+| `Tier.<name>.Enabled`, `Tier.<name>.Color` | per-tier on/off and colour; `<name>` is `Currency`, `Poor`, `Common`, `Uncommon`, `Rare`, `Epic`, `Legendary`, `Artifact`, `Heirloom` |
 
 ## Notes
 
@@ -78,7 +110,10 @@ with the defaults on first load.
   flags `UNIT_DYNFLAG_LOOTABLE`, so once you loot one the flag clears and the beacon goes away. Set it
   to 0 to mark every dead NPC instead. If the flags field cannot be trusted on a given client build it
   falls back to the health-only verdict rather than turning into noise.
-- Loot quality is only known for a body the client has been sent loot for (see above). The module does
-  not request loot itself: it never talks to the server and never opens the loot window.
+- Loot quality is only known for a body the client has been sent loot for, unless the server runs
+  the companion **mod-loot-beam** module (see **Server-driven colour** above). The module does not
+  request loot itself: it never asks the server for anything and never opens the loot window.
 - Player corpses are left alone -- this marks NPC bodies.
-- Purely visual and client-side: the server never learns the beams exist.
+- Purely visual: the module sends nothing to the server, and on a stock server the server never
+  learns the beams exist. When the companion server module is present it only writes the corpse's own
+  best-loot-quality back onto that corpse; it does not read anything from the client.

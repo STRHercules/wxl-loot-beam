@@ -51,7 +51,22 @@ namespace wxl::scripts::loot_beam
         constexpr float       kUnitToByte = 255.0f;
         // Bumped when a shipped default changes in a way an existing file must adopt. A file older
         // than this has its stale distance/depth keys replaced with the always-visible defaults.
-        constexpr int         kConfigVersion = 4;
+        constexpr int         kConfigVersion = 6;
+
+        // INI key stem and panel label per GearTier, in the order the panel lists them. The stem names
+        // the keys Tier.<Stem>.Enabled and Tier.<Stem>.Color.
+        struct TierDef { const char* stem; const char* label; };
+        constexpr TierDef kTierDefs[kTierCount] = {
+            { "Currency",  "Currency"  },
+            { "Poor",      "Poor"      },
+            { "Common",    "Common"    },
+            { "Uncommon",  "Uncommon"  },
+            { "Rare",      "Rare"      },
+            { "Epic",      "Epic"      },
+            { "Legendary", "Legendary" },
+            { "Artifact",  "Artifact"  },
+            { "Heirloom",  "Heirloom"  },
+        };
 
         // Descriptor reads are guarded: a wrong field index or a half-built object reads a nearby heap
         // dword. The validators reject an address that cannot be a live block before the SEH frame is
@@ -123,6 +138,39 @@ namespace wxl::scripts::loot_beam
             if (!ValidPointer(descriptors, kUnitHealthField + sizeof(uint32_t)))
                 return false;
             return ReadU32(descriptors + kUnitHealthField, health);
+        }
+
+        /**
+         * @brief Reads the server's loot-beam tier off a corpse. False when there is no hint.
+         *
+         * The companion AzerothCore module (mod-loot-beam) writes the corpse's tier into
+         * UNIT_FIELD_PADDING: 1..8 are item qualities 0..7 stored as quality + 1, 9 is a corpse
+         * whose loot held money but no gear, and 0 is the untouched default ("no hint"). That is why
+         * a stored value of 1..8 is already the GearTier index it maps to. Anything out of range is
+         * treated as no hint, and the locally learned loot is used instead.
+         */
+        bool UnitLootBeamTier(void* unit, int& tier)
+        {
+            uintptr_t descriptors = 0;
+            if (!ReadPtr(reinterpret_cast<uintptr_t>(unit) + kObjectDescriptorField, descriptors))
+                return false;
+            if (!ValidPointer(descriptors, kUnitLootBeamField + sizeof(uint32_t)))
+                return false;
+
+            uint32_t value = 0;
+            if (!ReadU32(descriptors + kUnitLootBeamField, value))
+                return false;
+
+            if (value == kLootBeamCurrencyHint)
+            {
+                tier = kTierCurrency;
+                return true;
+            }
+            if (value < 1 || value > kLootBeamQualityMax + 1)
+                return false;
+
+            tier = int(value);
+            return true;
         }
 
         /**
@@ -258,16 +306,28 @@ namespace wxl::scripts::loot_beam
 
         bool SameStyle(const BeamStyle& a, const BeamStyle& b)
         {
-            return a.enabled == b.enabled && a.height == b.height && a.baseOffset == b.baseOffset &&
-                   a.groundRadius == b.groundRadius && a.beamWidth == b.beamWidth &&
-                   a.widthPerYard == b.widthPerYard &&
-                   a.color[0] == b.color[0] && a.color[1] == b.color[1] && a.color[2] == b.color[2] &&
-                   a.groundAlpha == b.groundAlpha &&
-                   a.beamAlpha == b.beamAlpha && a.pulse == b.pulse && a.pulseSpeed == b.pulseSpeed &&
-                   a.fadeIn == b.fadeIn && a.fadeOut == b.fadeOut &&
-                   a.maxDistance == b.maxDistance && a.showGround == b.showGround &&
-                   a.showBeam == b.showBeam && a.throughWalls == b.throughWalls &&
-                   a.requireLootable == b.requireLootable && a.lootColor == b.lootColor;
+            if (!(a.enabled == b.enabled && a.height == b.height && a.baseOffset == b.baseOffset &&
+                  a.groundRadius == b.groundRadius && a.beamWidth == b.beamWidth &&
+                  a.widthPerYard == b.widthPerYard &&
+                  a.color[0] == b.color[0] && a.color[1] == b.color[1] && a.color[2] == b.color[2] &&
+                  a.groundAlpha == b.groundAlpha &&
+                  a.beamAlpha == b.beamAlpha && a.pulse == b.pulse && a.pulseSpeed == b.pulseSpeed &&
+                  a.fadeIn == b.fadeIn && a.fadeOut == b.fadeOut &&
+                  a.maxDistance == b.maxDistance && a.showGround == b.showGround &&
+                  a.showBeam == b.showBeam && a.throughWalls == b.throughWalls &&
+                  a.requireLootable == b.requireLootable && a.lootColor == b.lootColor &&
+                  a.serverColor == b.serverColor))
+                return false;
+
+            for (int t = 0; t < kTierCount; ++t)
+            {
+                if (a.tiers[t].enabled != b.tiers[t].enabled)
+                    return false;
+                for (int c = 0; c < 3; ++c)
+                    if (a.tiers[t].color[c] != b.tiers[t].color[c])
+                        return false;
+            }
+            return true;
         }
     }
 
@@ -331,7 +391,18 @@ namespace wxl::scripts::loot_beam
         s.throughWalls   = ReadBool(iniPath_,  "ThroughWalls",  s.throughWalls);
         s.requireLootable= ReadBool(iniPath_,  "RequireLootable", s.requireLootable);
         s.lootColor      = ReadBool(iniPath_,  "LootColor",       s.lootColor);
+        s.serverColor    = ReadBool(iniPath_,  "ServerColor",     s.serverColor);
         ReadColor(iniPath_, "Color", s.color);
+
+        // Per-tier look. A file that predates the tier keys simply keeps the tier defaults above.
+        for (int t = 0; t < kTierCount; ++t)
+        {
+            const std::string stem    = std::string("Tier.") + kTierDefs[t].stem;
+            const std::string enabled = stem + ".Enabled";
+            const std::string color   = stem + ".Color";
+            s.tiers[t].enabled = ReadBool(iniPath_, enabled.c_str(), s.tiers[t].enabled);
+            ReadColor(iniPath_, color.c_str(), s.tiers[t].color);
+        }
 
         // A file written by an older build carries a distance cap and the wrong idea of depth, so a
         // few defaults are adopted for exactly those keys and persisted; an existing install then does
@@ -349,10 +420,10 @@ namespace wxl::scripts::loot_beam
             // Version 3 marks only still-lootable corpses, so a looted body's beam goes away; older
             // files defaulted to marking every corpse.
             if (version < 3) s.requireLootable = true;
-            // Version 4 lets the world hide the beacon again: light does not shine through a wall, and
-            // a marker that does reads as a HUD element rather than something in the scene. Earlier
-            // files turned the depth test off while chasing visibility at range.
-            if (version < 4) s.throughWalls = false;
+            // Version 4 made the world hide the beacon again; version 5 reverses that, because a
+            // marker a rise can hide is a marker that gets missed. An older file adopts always-visible,
+            // and a file rewritten at version 5 or later keeps whatever the panel left it at.
+            if (version < 5) s.throughWalls = true;
         }
 
         style_ = s;
@@ -408,7 +479,18 @@ namespace wxl::scripts::loot_beam
         WriteInt(iniPath_,   "ThroughWalls",    style_.throughWalls ? 1 : 0);
         WriteInt(iniPath_,   "RequireLootable", style_.requireLootable ? 1 : 0);
         WriteInt(iniPath_,   "LootColor",       style_.lootColor ? 1 : 0);
+        WriteInt(iniPath_,   "ServerColor",     style_.serverColor ? 1 : 0);
         WriteColor(iniPath_, "Color",           style_.color);
+
+        for (int t = 0; t < kTierCount; ++t)
+        {
+            const std::string stem    = std::string("Tier.") + kTierDefs[t].stem;
+            const std::string enabled = stem + ".Enabled";
+            const std::string color   = stem + ".Color";
+            WriteInt(iniPath_,   enabled.c_str(), style_.tiers[t].enabled ? 1 : 0);
+            WriteColor(iniPath_, color.c_str(),   style_.tiers[t].color);
+        }
+
         WriteInt(iniPath_,   "ConfigVersion",   kConfigVersion);
 
         // The write bumps the file stamp; adopt it so the self-write is not mistaken for an external
@@ -479,6 +561,32 @@ namespace wxl::scripts::loot_beam
             if (api.UiCheckbox("Only lootable corpses", &lootable)) style_.requireLootable = lootable != 0;
             int lootColor = style_.lootColor ? 1 : 0;
             if (api.UiCheckbox("Colour by loot rarity", &lootColor)) style_.lootColor = lootColor != 0;
+            int serverColor = style_.serverColor ? 1 : 0;
+            if (api.UiCheckbox("Prefer server loot colour", &serverColor)) style_.serverColor = serverColor != 0;
+        }
+
+        // One row per tier: a switch to draw it at all, and the colour it is drawn in. A tier switched
+        // off leaves corpses that fall into it unmarked, so unwanted drops can be filtered out.
+        if (api.UiCollapsingHeader("Gear tiers"))
+        {
+            for (int t = 0; t < kTierCount; ++t)
+            {
+                int on = style_.tiers[t].enabled ? 1 : 0;
+                if (api.UiCheckbox(kTierDefs[t].label, &on))
+                    style_.tiers[t].enabled = on != 0;
+
+                api.UiSameLine();
+                char id[32];
+                std::snprintf(id, sizeof(id), "##tier%d", t);
+                float rgba[4] = { style_.tiers[t].color[0], style_.tiers[t].color[1],
+                                  style_.tiers[t].color[2], 1.0f };
+                if (api.UiColorEdit(id, rgba))
+                {
+                    style_.tiers[t].color[0] = rgba[0];
+                    style_.tiers[t].color[1] = rgba[1];
+                    style_.tiers[t].color[2] = rgba[2];
+                }
+            }
         }
 
         api.UiSeparator();
@@ -547,75 +655,75 @@ namespace wxl::scripts::loot_beam
                 b = &beacons_[trackedCount_++];
                 b->guid = guid;
                 b->fade = 0.0f;
-                b->quality = -1;
+                b->tier = -1;
             }
             b->pos[0] = p[0];
             b->pos[1] = p[1];
             b->pos[2] = p[2];
             b->seen   = true;
+
+            // A corpse the server tagged carries its tier (best quality, or money-only) from the
+            // moment it dies, so prefer it over the loot the client only learns once the window has
+            // opened.
+            int serverTier = -1;
+            if (style_.lootColor && style_.serverColor && UnitLootBeamTier(obj, serverTier))
+            {
+                b->tier       = serverTier;
+                b->serverTint = true;
+                if (!loggedServerHint_)
+                {
+                    loggedServerHint_ = true;
+                    Log(WXL_LOG_INFO, "diag: server loot hint guid=%llX tier=%d", guid, serverTier);
+                }
+            }
             return true;
         });
 
         return enumerated;
     }
 
-    namespace
-    {
-        // The standard item-quality tints, indexed by quality 0 (poor) through 7 (heirloom). Kept as
-        // the exact game colours so a beam matches the item link the loot window shows.
-        const float kQualityColor[8][3] = {
-            { 0.62f, 0.62f, 0.62f }, // 0 poor      #9D9D9D
-            { 1.00f, 1.00f, 1.00f }, // 1 common    #FFFFFF
-            { 0.12f, 1.00f, 0.00f }, // 2 uncommon  #1EFF00
-            { 0.00f, 0.44f, 0.87f }, // 3 rare      #0070DD
-            { 0.64f, 0.21f, 0.93f }, // 4 epic      #A335EE
-            { 1.00f, 0.50f, 0.00f }, // 5 legendary #FF8000
-            { 0.90f, 0.80f, 0.50f }, // 6 artifact  #E6CC80
-            { 0.00f, 0.80f, 1.00f }, // 7 heirloom  #00CCFF
-        };
-    }
-
     // Reads the loot the client currently holds and, when it belongs to a tracked corpse, records the
-    // best item quality on that beacon. The client keeps one loot at a time and only learns a corpse's
-    // contents when loot is requested for it, so the quality is adopted the moment the loot opens and
-    // kept on the tracked beacon afterwards.
+    // GearTier of its best item on that beacon. The client keeps one loot at a time and only learns a
+    // corpse's contents when loot is requested for it, so the tier is adopted the moment the loot
+    // opens and kept on the tracked beacon afterwards. The server hint (above) takes precedence.
     void LootBeam::ScanLoot()
     {
         if (!style_.lootColor)
         {
-            lootGuid_    = 0;
-            lootQuality_ = -1;
+            lootGuid_ = 0;
+            lootTier_ = -1;
             return;
         }
 
         unsigned long long guid = 0;
         if (!ReadU64(kLootSourceGuid, guid))
         {
-            lootGuid_    = 0;
-            lootQuality_ = -1;
+            lootGuid_ = 0;
+            lootTier_ = -1;
             return;
         }
 
         if (guid != lootGuid_)
         {
-            lootGuid_    = guid;
-            lootQuality_ = guid != 0 ? ReadLootQuality() : -1;
+            lootGuid_ = guid;
+            lootTier_ = guid != 0 ? ReadLootTier() : -1;
             if (guid != 0)
-                Log(WXL_LOG_INFO, "loot: source=%llX bestQuality=%d", guid, lootQuality_);
+                Log(WXL_LOG_INFO, "loot: source=%llX bestTier=%d", guid, lootTier_);
         }
 
-        if (lootQuality_ < 0) return;
+        if (lootTier_ < 0) return;
         for (int i = 0; i < trackedCount_; ++i)
         {
-            if (beacons_[i].guid == lootGuid_)
-                beacons_[i].quality = lootQuality_;
+            if (beacons_[i].guid == lootGuid_ && !beacons_[i].serverTint)
+                beacons_[i].tier = lootTier_;
         }
     }
 
-    // The best item quality in the currently open loot, asked of the client itself (GetNumLootItems /
-    // GetLootSlotInfo) so no item-cache offset is reimplemented here. Returns -1 when there is no loot
-    // or the script state is not up; a slot whose fourth return is not a number contributes nothing.
-    int LootBeam::ReadLootQuality()
+    // The GearTier of the best item in the currently open loot, asked of the client itself
+    // (GetNumLootItems / GetLootSlotInfo) so no item-cache offset is reimplemented here. Returns -1
+    // when there is no loot or the script state is not up; a slot whose fourth return is not a number
+    // contributes nothing.
+    int LootBeam::ReadLootTier()
     {
         void* state = script::Context();
         if (!state) return -1;
@@ -649,7 +757,7 @@ namespace wxl::scripts::loot_beam
             script::SetTop(state, base);
         }
 
-        return best;
+        return best < 0 ? -1 : best + kTierPoor;
     }
 
     // Advances every tracked beacon's fade toward its target -- full when it was seen this frame, zero
@@ -981,8 +1089,17 @@ namespace wxl::scripts::loot_beam
         for (int i = 0; i < trackedCount_; ++i)
         {
             if (beacons_[i].fade <= 0.001f) continue;
-            const int    q   = beacons_[i].quality;
-            const float* rgb = (style_.lootColor && q >= 0) ? kQualityColor[q > 7 ? 7 : q] : style_.color;
+
+            const float* rgb = style_.color;
+            const int    t   = beacons_[i].tier;
+            if (style_.lootColor && t >= 0 && t < kTierCount)
+            {
+                // A tier switched off is filtered out entirely: the corpse gets no beacon at all, so
+                // unwanted drops (bare currency, greys, ...) can be hidden without hiding everything.
+                if (!style_.tiers[t].enabled) continue;
+                rgb = style_.tiers[t].color;
+            }
+
             QueueBeacon(beacons_[i].pos, pulseScale * beacons_[i].fade, rgb);
         }
     }
