@@ -17,8 +17,11 @@ is never missed; turn **Through walls** off to let the world occlude it like any
   short way up and easing to nothing at the top, with a horizontal falloff that keeps its edges soft
   and its core whiter;
 - the whole thing breathes slowly and eases in and out, so a live beacon never reads as scenery;
-- colour, size, height, opacity, range, pulse and fade are all tunable from the in-game overlay panel
-  under **Loot Beam**;
+- sparkle motes drift and twinkle through the shaft, each with its own drift, flicker and lifetime and
+  each seeded from its corpse's GUID, so the light shimmers rather than sits and no two bodies sparkle
+  in lockstep;
+- colour, size, height, opacity, range, pulse, fade and the sparkles are all tunable from the in-game
+  overlay panel under **Loot Beam**;
 - with **Colour by loot rarity** on (the default), a corpse whose loot is known glows in the quality
   colour of its best item -- green for a green, purple for an epic -- instead of the default gold.
 
@@ -110,6 +113,11 @@ with the defaults on first load.
 | `Color` | tint, as `#RRGGBB` |
 | `Pulse`, `PulseSpeed` | breathing depth and rate |
 | `FadeIn`, `FadeOut` | seconds to ease a beacon in on appear / out on loot (0 = instant) |
+| `Sparkles` | draw drifting, twinkling motes around the beam (default on) |
+| `SparkleCount` | motes per beacon, 0..32 (default 8) |
+| `SparkleSize`, `SparkleAlpha` | half-size in yards and peak opacity of a mote |
+| `SparkleRise`, `SparkleDrift` | a mote's upward drift and lateral wander, yards/s |
+| `SparkleLife`, `SparkleTwinkle` | seconds a mote lives before it is reborn, and its flicker rate |
 | `MaxDistance` | ignore corpses beyond this range (0 = unlimited) |
 | `ShowGround`, `ShowBeam` | keep just one half of the marker |
 | `ThroughWalls` | draw through terrain and walls (on by default, so a rise cannot hide the beacon) |

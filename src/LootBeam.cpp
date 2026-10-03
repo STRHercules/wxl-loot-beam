@@ -118,6 +118,62 @@ namespace wxl::scripts::loot_beam
 
         float Clamp01(float v) { return v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v); }
 
+        // A tiny xorshift so a mote's drift and flicker vary without <random>'s weight. The state
+        // lives on the beacon, seeded from its GUID, so two corpses do not sparkle in lockstep.
+        uint32_t NextRandom(uint32_t& state)
+        {
+            state ^= state << 13;
+            state ^= state >> 17;
+            state ^= state << 5;
+            return state;
+        }
+
+        float Random01(uint32_t& state)
+        {
+            return float(NextRandom(state) >> 8) * (1.0f / 16777216.0f);
+        }
+
+        // Puts one mote back at the start of its life: a fresh spot in the beam, a fresh drift and a
+        // fresh flicker. The age starts part-way in so a new beacon's motes are not all at the same
+        // point of their fade the instant the body appears.
+        void SpawnSparkle(Sparkle& sp, uint32_t& rng, const BeamStyle& style)
+        {
+            const float top  = fmaxf(style.height, style.baseOffset + 0.1f);
+            const float span = top - style.baseOffset;
+            const float ang  = Random01(rng) * kTwoPi;
+            const float rad  = sqrtf(Random01(rng)) * style.beamWidth * 1.5f;
+            const float dir  = Random01(rng) * kTwoPi;
+            const float drift = style.sparkleDrift * (0.4f + 1.2f * Random01(rng));
+
+            sp.vel[0] = cosf(dir) * drift;
+            sp.vel[1] = sinf(dir) * drift;
+            sp.vel[2] = style.sparkleRise * (0.5f + Random01(rng));
+            sp.life   = style.sparkleLife * (0.6f + 0.8f * Random01(rng));
+            sp.age    = Random01(rng) * sp.life * 0.5f;
+            sp.twinkle      = Random01(rng) * kTwoPi;
+            sp.twinkleSpeed = style.sparkleTwinkle * (0.6f + 0.8f * Random01(rng));
+
+            // Spread the field over most of the beam's height so a tall marker is not just a hot
+            // base; the initial age is applied to the offset so the fade is desynced too.
+            sp.pos[0] = cosf(ang) * rad + sp.vel[0] * sp.age;
+            sp.pos[1] = sinf(ang) * rad + sp.vel[1] * sp.age;
+            sp.pos[2] = style.baseOffset + span * 0.85f * Random01(rng) + sp.vel[2] * sp.age;
+        }
+
+        // Drifts one mote and respawns it once it has outlived its life or climbed out of the beam.
+        void AdvanceSparkle(Sparkle& sp, uint32_t& rng, const BeamStyle& style, float dt)
+        {
+            sp.age += dt;
+            sp.pos[0] += sp.vel[0] * dt;
+            sp.pos[1] += sp.vel[1] * dt;
+            sp.pos[2] += sp.vel[2] * dt;
+            sp.twinkle += sp.twinkleSpeed * dt;
+
+            const float top = fmaxf(style.height, style.baseOffset + 0.1f);
+            if (sp.age >= sp.life || sp.pos[2] > top)
+                SpawnSparkle(sp, rng, style);
+        }
+
         gfx::Color Pack(float alpha, const float rgb[3])
         {
             const uint32_t a = uint32_t(Clamp01(alpha) * kUnitToByte + 0.5f);
@@ -246,6 +302,12 @@ namespace wxl::scripts::loot_beam
             return v < lo ? lo : (v > hi ? hi : v);
         }
 
+        int ReadInt(const std::string& path, const char* key, int fallback, int lo, int hi)
+        {
+            const int v = GetPrivateProfileIntA(kIniSection, key, fallback, path.c_str());
+            return v < lo ? lo : (v > hi ? hi : v);
+        }
+
         // Accepts "#RRGGBB" / "RRGGBB" or "R,G,B" (0-255). Anything else leaves out untouched.
         void ReadColor(const std::string& path, const char* key, float out[3])
         {
@@ -316,7 +378,11 @@ namespace wxl::scripts::loot_beam
                   a.maxDistance == b.maxDistance && a.showGround == b.showGround &&
                   a.showBeam == b.showBeam && a.throughWalls == b.throughWalls &&
                   a.requireLootable == b.requireLootable && a.lootColor == b.lootColor &&
-                  a.serverColor == b.serverColor))
+                  a.serverColor == b.serverColor && a.showSparkles == b.showSparkles &&
+                  a.sparkleCount == b.sparkleCount && a.sparkleSize == b.sparkleSize &&
+                  a.sparkleAlpha == b.sparkleAlpha && a.sparkleRise == b.sparkleRise &&
+                  a.sparkleDrift == b.sparkleDrift && a.sparkleLife == b.sparkleLife &&
+                  a.sparkleTwinkle == b.sparkleTwinkle))
                 return false;
 
             for (int t = 0; t < kTierCount; ++t)
@@ -393,6 +459,15 @@ namespace wxl::scripts::loot_beam
         s.lootColor      = ReadBool(iniPath_,  "LootColor",       s.lootColor);
         s.serverColor    = ReadBool(iniPath_,  "ServerColor",     s.serverColor);
         ReadColor(iniPath_, "Color", s.color);
+
+        s.showSparkles   = ReadBool(iniPath_,  "Sparkles",       s.showSparkles);
+        s.sparkleCount   = ReadInt(iniPath_,   "SparkleCount",   s.sparkleCount,   0, kMaxSparkles);
+        s.sparkleSize    = ReadFloat(iniPath_, "SparkleSize",    s.sparkleSize,    0.01f, 0.60f);
+        s.sparkleAlpha   = ReadFloat(iniPath_, "SparkleAlpha",   s.sparkleAlpha,   0.0f, 1.0f);
+        s.sparkleRise    = ReadFloat(iniPath_, "SparkleRise",    s.sparkleRise,    0.0f, 3.0f);
+        s.sparkleDrift   = ReadFloat(iniPath_, "SparkleDrift",   s.sparkleDrift,   0.0f, 2.0f);
+        s.sparkleLife    = ReadFloat(iniPath_, "SparkleLife",    s.sparkleLife,    0.2f, 6.0f);
+        s.sparkleTwinkle = ReadFloat(iniPath_, "SparkleTwinkle", s.sparkleTwinkle, 0.0f, 12.0f);
 
         // Per-tier look. A file that predates the tier keys simply keeps the tier defaults above.
         for (int t = 0; t < kTierCount; ++t)
@@ -482,6 +557,15 @@ namespace wxl::scripts::loot_beam
         WriteInt(iniPath_,   "ServerColor",     style_.serverColor ? 1 : 0);
         WriteColor(iniPath_, "Color",           style_.color);
 
+        WriteInt(iniPath_,   "Sparkles",        style_.showSparkles ? 1 : 0);
+        WriteInt(iniPath_,   "SparkleCount",    style_.sparkleCount);
+        WriteFloat(iniPath_, "SparkleSize",     style_.sparkleSize);
+        WriteFloat(iniPath_, "SparkleAlpha",    style_.sparkleAlpha);
+        WriteFloat(iniPath_, "SparkleRise",     style_.sparkleRise);
+        WriteFloat(iniPath_, "SparkleDrift",    style_.sparkleDrift);
+        WriteFloat(iniPath_, "SparkleLife",     style_.sparkleLife);
+        WriteFloat(iniPath_, "SparkleTwinkle",  style_.sparkleTwinkle);
+
         for (int t = 0; t < kTierCount; ++t)
         {
             const std::string stem    = std::string("Tier.") + kTierDefs[t].stem;
@@ -541,6 +625,25 @@ namespace wxl::scripts::loot_beam
                 style_.color[1] = rgba[1];
                 style_.color[2] = rgba[2];
             }
+        }
+
+        if (api.UiCollapsingHeader("Sparkles"))
+        {
+            int sparkles = style_.showSparkles ? 1 : 0;
+            if (api.UiCheckbox("Show sparkles", &sparkles)) style_.showSparkles = sparkles != 0;
+
+            // The SDK panel offers only float sliders, so the integer count is edited as one and
+            // rounded on the way back.
+            float count = float(style_.sparkleCount);
+            if (api.UiSliderFloat("Count", &count, 0.0f, float(kMaxSparkles)))
+                style_.sparkleCount = int(count + 0.5f);
+
+            api.UiSliderFloat("Size (yd)", &style_.sparkleSize, 0.01f, 0.6f);
+            api.UiSliderFloat("Alpha", &style_.sparkleAlpha, 0.0f, 1.0f);
+            api.UiSliderFloat("Rise (yd/s)", &style_.sparkleRise, 0.0f, 3.0f);
+            api.UiSliderFloat("Drift (yd/s)", &style_.sparkleDrift, 0.0f, 2.0f);
+            api.UiSliderFloat("Life (s)", &style_.sparkleLife, 0.2f, 6.0f);
+            api.UiSliderFloat("Twinkle", &style_.sparkleTwinkle, 0.0f, 12.0f);
         }
 
         if (api.UiCollapsingHeader("Behaviour"))
@@ -656,6 +759,7 @@ namespace wxl::scripts::loot_beam
                 b->guid = guid;
                 b->fade = 0.0f;
                 b->tier = -1;
+                SeedSparkles(*b);
             }
             b->pos[0] = p[0];
             b->pos[1] = p[1];
@@ -781,6 +885,7 @@ namespace wxl::scripts::loot_beam
                 b.fade -= outRate * dt;
                 if (b.fade <= 0.0f) continue; // finished fading; forget it
             }
+            if (b.fade > 0.001f) AdvanceSparkles(b, dt);
             beacons_[kept++] = b;
         }
         trackedCount_ = kept;
@@ -991,9 +1096,120 @@ namespace wxl::scripts::loot_beam
                 }
             }
         }
+
+        // Drifting, twinkling motes inside the beam. Each is a small camera-facing disc of light -- a
+        // hot core easing out to a transparent rim through a shoulder ring -- so additive blending
+        // turns it into a soft ball that glows at its centre rather than a flat square. Its brightness
+        // rides the mote's own flicker phase and life envelope, and it swells a touch as it brightens.
+        void QueueSparkles(const float pos[3], const Sparkle* sparkles, int count,
+                           const BeamStyle& style, float alphaScale, const float rgb[3])
+        {
+            if (count <= 0)
+                return;
+
+            float camera[3];
+            cam::GetPosition(camera);
+
+            constexpr int   kSegments = 8;
+            constexpr float kRing1 = 0.45f, kRing2 = 1.0f; // radii, as fractions of the mote size
+            constexpr float kShoulder = 0.58f;             // brightness of the middle ring
+
+            for (int i = 0; i < count; ++i)
+            {
+                const Sparkle& sp = sparkles[i];
+                const float lifeT = sp.life > 0.001f ? sp.age / sp.life : 1.0f;
+
+                // Ease in off the spawn, hold, then ease out, so a mote never pops in or cuts off.
+                constexpr float kIn = 0.15f, kOut = 0.45f;
+                float env = 1.0f;
+                if (lifeT < kIn)              env = lifeT / kIn;
+                else if (lifeT > 1.0f - kOut) env = (1.0f - lifeT) / kOut;
+                if (env < 0.0f) env = 0.0f;
+                if (env > 1.0f) env = 1.0f;
+
+                const float twinkle = 0.5f + 0.5f * sinf(sp.twinkle);
+                const float alpha   = style.sparkleAlpha * env * twinkle * alphaScale;
+                if (alpha <= 0.003f)
+                    continue;
+
+                const float wx = pos[0] + sp.pos[0];
+                const float wy = pos[1] + sp.pos[1];
+                const float wz = pos[2] + sp.pos[2];
+
+                // The disc lies in the plane perpendicular to the eye->mote ray, so it reads as a
+                // round ball from any angle (the shaft's vertical billboard would foreshorten it when
+                // the camera looks down). cross(worldUp, f) collapses when the ray is straight up or
+                // down, so that degenerate case falls back to a world axis.
+                float f[3] = { wx - camera[0], wy - camera[1], wz - camera[2] };
+                float flen = sqrtf(f[0] * f[0] + f[1] * f[1] + f[2] * f[2]);
+                if (flen < 1e-4f) { f[0] = 0.0f; f[1] = 1.0f; f[2] = 0.0f; flen = 1.0f; }
+                f[0] /= flen; f[1] /= flen; f[2] /= flen;
+
+                float r[3] = { -f[1], f[0], 0.0f };
+                float rlen = sqrtf(r[0] * r[0] + r[1] * r[1]);
+                if (rlen < 1e-4f) { r[0] = 1.0f; r[1] = 0.0f; r[2] = 0.0f; rlen = 1.0f; }
+                r[0] /= rlen; r[1] /= rlen; r[2] /= rlen;
+
+                float u[3] = { f[1] * r[2] - f[2] * r[1],
+                               f[2] * r[0] - f[0] * r[2],
+                               f[0] * r[1] - f[1] * r[0] };
+
+                // A mote swells a little as it brightens, so a flicker reads as a glint.
+                const float size = style.sparkleSize * (0.85f + 0.15f * twinkle);
+                for (int k = 0; k < 3; ++k) { r[k] *= size; u[k] *= size; }
+
+                const gfx::Color core     = PackTint(alpha, rgb, 0.85f);
+                const gfx::Color shoulder = PackTint(alpha * kShoulder, rgb, 0.55f);
+                const gfx::Color rim      = Pack(0.0f, rgb);
+
+                float mid[kSegments][3];
+                float edge[kSegments][3];
+                for (int s = 0; s < kSegments; ++s)
+                {
+                    const float a  = kTwoPi * float(s) / float(kSegments);
+                    const float ca = cosf(a), sa = sinf(a);
+                    const float dx = r[0] * ca + u[0] * sa;
+                    const float dy = r[1] * ca + u[1] * sa;
+                    const float dz = r[2] * ca + u[2] * sa;
+
+                    mid[s][0]  = wx + dx * kRing1; mid[s][1]  = wy + dy * kRing1; mid[s][2]  = wz + dz * kRing1;
+                    edge[s][0] = wx + dx * kRing2; edge[s][1] = wy + dy * kRing2; edge[s][2] = wz + dz * kRing2;
+                }
+
+                const float centre[3] = { wx, wy, wz };
+                for (int s = 0; s < kSegments; ++s)
+                {
+                    const int n = (s + 1) % kSegments;
+                    beacon_gfx::Triangle(centre, mid[s], mid[n], core, shoulder, shoulder);
+                    beacon_gfx::Triangle(mid[s], edge[s], edge[n], shoulder, rim, rim);
+                    beacon_gfx::Triangle(mid[s], edge[n], mid[n], shoulder, rim, shoulder);
+                }
+            }
+        }
     }
 
-    void LootBeam::QueueBeacon(const float pos[3], float alphaScale, const float rgb[3])
+    // Seeds a new beacon's mote field from its GUID, so each corpse's sparkles drift and flicker on
+    // their own schedule rather than in lockstep with every other beacon.
+    void LootBeam::SeedSparkles(Beacon& b)
+    {
+        uint32_t seed = uint32_t(b.guid) ^ uint32_t(b.guid >> 32);
+        seed ^= 0x9E3779B9u;
+        if (seed == 0)
+            seed = 0xA341316Cu;
+        b.rngSeed = seed;
+        for (int i = 0; i < kMaxSparkles; ++i)
+            SpawnSparkle(b.sparkles[i], b.rngSeed, style_);
+    }
+
+    void LootBeam::AdvanceSparkles(Beacon& b, float dt)
+    {
+        if (style_.sparkleCount <= 0)
+            return;
+        for (int i = 0; i < kMaxSparkles; ++i)
+            AdvanceSparkle(b.sparkles[i], b.rngSeed, style_, dt);
+    }
+
+    void LootBeam::QueueBeacon(const Beacon& beacon, float alphaScale, const float rgb[3])
     {
         // The tint is per-beacon now, so it is applied to a copy the two shape builders read exactly
         // as before rather than threading a colour through both of them.
@@ -1007,13 +1223,20 @@ namespace wxl::scripts::loot_beam
         // The body is on the ground, so its own position is the height the shaft rises from. Only the
         // pool needs a ground query, because it follows the terrain away from the body; using a query
         // for the shaft too risked a bad hit on a lower surface burying it under the rendered terrain.
-        const float baseZ = pos[2];
+        const float baseZ = beacon.pos[2];
 
         if (style.showGround)
-            QueueGroundGlow(pos, style, alphaScale);
+            QueueGroundGlow(beacon.pos, style, alphaScale);
 
         if (style.showBeam && style.height > 0.01f)
-            QueueBeamColumn(pos, baseZ, style, alphaScale);
+            QueueBeamColumn(beacon.pos, baseZ, style, alphaScale);
+
+        if (style.showSparkles && style.sparkleCount > 0)
+        {
+            int count = style.sparkleCount;
+            if (count > kMaxSparkles) count = kMaxSparkles;
+            QueueSparkles(beacon.pos, beacon.sparkles, count, style, alphaScale, rgb);
+        }
     }
 
     void LootBeam::OnWorldEnter(const ev::WorldEnterArgs& a)
@@ -1100,7 +1323,7 @@ namespace wxl::scripts::loot_beam
                 rgb = style_.tiers[t].color;
             }
 
-            QueueBeacon(beacons_[i].pos, pulseScale * beacons_[i].fade, rgb);
+            QueueBeacon(beacons_[i], pulseScale * beacons_[i].fade, rgb);
         }
     }
 

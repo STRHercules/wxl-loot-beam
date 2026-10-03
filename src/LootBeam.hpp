@@ -20,6 +20,7 @@
 #include "wxl/PluginApi.h"
 #include "wxl/EventScript.hpp"
 
+#include <cstdint>
 #include <string>
 
 // World-space beacon over lootable corpses. It never touches a raw client address for anything the SDK
@@ -49,6 +50,23 @@ namespace wxl::scripts::loot_beam
         kTierArtifact,     // quality 6  gold
         kTierHeirloom,     // quality 7  cyan
         kTierCount
+    };
+
+    /**
+     * @brief One sparkle mote: a small glint that drifts, twinkles and is reborn where it flies.
+     *
+     * Positions are offsets from the beacon's own base, in yards. Each mote is simulated once per
+     * frame and respawned in place when it outlives its life or climbs out of the top of the beam, so
+     * a beacon carries its own self-refreshing field of motes rather than a global particle pool.
+     */
+    struct Sparkle
+    {
+        float pos[3]       = {};    // offset from the beacon base, yards
+        float vel[3]       = {};    // the drift the mote moves with, yards/s
+        float age          = 0.0f;  // seconds it has lived
+        float life         = 1.0f;  // seconds before it respawns
+        float twinkle      = 0.0f;  // phase of its brightness flicker, radians
+        float twinkleSpeed = 0.0f;  // radians/s the flicker advances at
     };
 
     /** @brief One tier's look: whether it is drawn at all, and the colour it is drawn in. */
@@ -116,6 +134,17 @@ namespace wxl::scripts::loot_beam
         // the beacon be the right colour the moment the body dies, without waiting for the loot
         // window. When the server sends no hint the local loot is used as before.
         bool  serverColor = true;
+
+        // Sparkle motes that drift and twinkle around the beam, per beacon. The field is seeded from
+        // the corpse's GUID, so no two bodies flicker in lockstep. Count is capped at kMaxSparkles.
+        bool  showSparkles   = true;   // draw drifting sparkle motes around the beam
+        int   sparkleCount   = 8;      // motes per beacon
+        float sparkleSize    = 0.09f;  // half-extent of a mote, yards
+        float sparkleAlpha   = 0.90f;  // peak opacity of a mote at the crest of its twinkle
+        float sparkleRise    = 0.90f;  // upward drift, yards/s
+        float sparkleDrift   = 0.35f;  // lateral wander, yards/s
+        float sparkleLife    = 2.40f;  // seconds a mote lives before it respawns
+        float sparkleTwinkle = 4.00f;  // flicker speed, radians/s
     };
 
     class LootBeam final : public wxl::ext::EventScript
@@ -141,9 +170,12 @@ namespace wxl::scripts::loot_beam
         /** @brief True when the live look differs from what is on disk. */
         bool HasUnsavedChanges() const;
 
-        static constexpr int kMaxBeacons = 64; // corpses beamed at once; the rest wait for a slot
+        static constexpr int kMaxBeacons  = 64; // corpses beamed at once; the rest wait for a slot
+        static constexpr int kMaxSparkles = 32; // mote field size a single beacon can carry
 
     private:
+        struct Beacon; // one tracked corpse, defined below but named by the steps above
+
         // --- event handlers ---
         void OnUpdate(const events::UpdateArgs& a);
         void OnWorldSceneEnd(const events::WorldSceneEndArgs& a);
@@ -156,7 +188,9 @@ namespace wxl::scripts::loot_beam
         int  ReadLootTier();                    // GearTier of the currently open loot, or -1
         void UpdateFade(float dt);              // advance each beacon's fade; drop the dead ones
         void DumpUnit(void* unit, unsigned long long guid); // one-shot descriptor window for debugging
-        void QueueBeacon(const float pos[3], float alphaScale, const float rgb[3]); // glow + beam
+        void QueueBeacon(const Beacon& beacon, float alphaScale, const float rgb[3]); // glow + beam + motes
+        void SeedSparkles(Beacon& b);  // fill a new beacon's mote field from its GUID
+        void AdvanceSparkles(Beacon& b, float dt); // drift and respawn a beacon's motes
         void LoadConfigNow();
         void ReloadConfigIfChanged();
         void Log(int level, const char* fmt, ...) const;
@@ -169,6 +203,9 @@ namespace wxl::scripts::loot_beam
             int                tier = -1;     // GearTier of the corpse's loot, -1 until known
             bool               serverTint = false; // tier came from the server, not the open loot
             bool               seen   = false;
+
+            Sparkle            sparkles[kMaxSparkles]{}; // self-refreshing mote field for this body
+            uint32_t           rngSeed = 0;              // xorshift state the respawns draw from
         };
 
         Beacon         beacons_[kMaxBeacons]{}; // persists across frames so a beacon can fade

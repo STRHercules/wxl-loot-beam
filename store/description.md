@@ -3,8 +3,9 @@ pillar of light from every NPC corpse that can still be looted, so the one worth
 itself from across the camp.
 
 The beam is capped at 15 yards by default -- tall enough to spot across a camp, short enough to stay a
-marker rather than a light show. It breathes slowly so a live beacon never reads as scenery, and the
-glow hugs the terrain so it lies flat on a slope. It draws through terrain and walls by default, so a
+marker rather than a light show. It breathes slowly so a live beacon never reads as scenery,
+drifting sparkles twinkle up through the shaft so the light shimmers rather than sits, and the glow
+hugs the terrain so it lies flat on a slope. It draws through terrain and walls by default, so a
 body tucked behind a rise is never missed; turn **Through walls** off if you would rather the world
 hide it like anything else.
 
