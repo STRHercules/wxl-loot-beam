@@ -984,11 +984,57 @@ namespace wxl::scripts::loot_beam
             return Pack(alpha, c);
         }
 
+        // The largest beam grid; a beacon close enough to fill the screen uses all of it, and a distant
+        // one uses fewer rows (see the LOD in QueueBeamColumn).
+        constexpr int kBeamMaxRows = 8;
+        constexpr int kBeamMaxCols = 4;
+
+        // True when the shaft's bounding sphere may cross the view frustum. The planes come from the
+        // engine's own combined view-projection (cam::GetViewProj), so a beacon this rejects would have
+        // drawn no pixel; a conservative sphere test never drops one that is even partly visible. It is
+        // the first line of defence when many corpses are around: a beacon behind the camera or off the
+        // edge is skipped before its large additive quad reaches the rasteriser.
+        bool BeamInView(const float pos[3], const BeamStyle& style)
+        {
+            const float* m = cam::GetViewProj();
+            if (!m) return true; // no matrices yet; do not cull what cannot be tested
+
+            const float lo = style.baseOffset;
+            const float hi = fmaxf(style.height, lo + 0.1f);
+            const float cx = pos[0];
+            const float cy = pos[1];
+            const float cz = pos[2] + 0.5f * (lo + hi);
+            const float radius = 0.5f * (hi - lo) + style.beamWidth + 0.5f;
+
+            // Row-vector clip space: clip = p * m. Each frustum plane is a column combination of m and
+            // a point is inside it when the plane value is >= 0; the sphere is outside only when even
+            // its nearest point is negative.
+            const float planes[5][4] = {
+                { m[0] + m[3], m[4] + m[7], m[8] + m[11], m[12] + m[15] }, // left
+                { m[3] - m[0], m[7] - m[4], m[11] - m[8], m[15] - m[12] }, // right
+                { m[1] + m[3], m[5] + m[7], m[9] + m[11], m[13] + m[15] }, // bottom
+                { m[3] - m[1], m[7] - m[5], m[11] - m[9], m[15] - m[13] }, // top
+                { m[2],        m[6],        m[10],        m[14]        }, // near (clip z >= 0)
+            };
+
+            for (const auto& p : planes)
+            {
+                const float dist = cx * p[0] + cy * p[1] + cz * p[2] + p[3];
+                const float len  = sqrtf(p[0] * p[0] + p[1] * p[1] + p[2] * p[2]);
+                if (dist + radius * len < 0.0f)
+                    return false;
+            }
+            return true;
+        }
+
         // The shaft: one camera-facing billboard, gridded so a colour can sit on every vertex. The
         // horizontal falloff keeps the core bright and the edges transparent; the vertical one is
         // transparent at the floating base, peaks just above it, then eases to nothing at the top.
-        // Interpolated across the grid, a few quads read as a soft, hot-cored volume.
-        void QueueBeamColumn(const float pos[3], float bodyZ, const BeamStyle& style, float alphaScale)
+        // Interpolated across the grid, a few quads read as a soft, hot-cored volume. The grid is
+        // reduced with distance -- a far shaft is a few pixels tall, so its falloff would be lost on
+        // the screen anyway -- which keeps the near look unchanged while cutting the vertex work.
+        void QueueBeamColumn(const float pos[3], float bodyZ, const BeamStyle& style, float alphaScale,
+                             const float rgb[3])
         {
             float camera[3];
             cam::GetPosition(camera);
@@ -1007,38 +1053,40 @@ namespace wxl::scripts::loot_beam
             // so a distant corpse still shows a column. 0 leaves the taper alone.
             const float minHalfWidth = style.widthPerYard > 0.0f ? style.widthPerYard * dist : 0.0f;
 
-            constexpr int kRows = 8;
-            constexpr int kCols = 4;
+            int rows = kBeamMaxRows;
+            int cols = kBeamMaxCols;
+            if (dist > 150.0f)      { rows = 4; cols = 3; }
+            else if (dist > 80.0f)  { rows = 6; cols = 4; }
 
             const float baseZ = bodyZ + style.baseOffset;
             const float topZ  = bodyZ + fmaxf(style.height, style.baseOffset + 0.1f);
 
-            float      xs[kRows + 1][kCols + 1];
-            float      ys[kRows + 1][kCols + 1];
-            float      zs[kRows + 1];
-            gfx::Color cs[kRows + 1][kCols + 1];
+            float      xs[kBeamMaxRows + 1][kBeamMaxCols + 1];
+            float      ys[kBeamMaxRows + 1][kBeamMaxCols + 1];
+            float      zs[kBeamMaxRows + 1];
+            gfx::Color cs[kBeamMaxRows + 1][kBeamMaxCols + 1];
 
-            for (int r = 0; r <= kRows; ++r)
+            for (int r = 0; r <= rows; ++r)
             {
-                const float t = float(r) / float(kRows);
+                const float t = float(r) / float(rows);
                 const float w = fmaxf(style.beamWidth * (1.0f - 0.55f * t), minHalfWidth);
                 const float v = BeamVertical(t);
                 zs[r] = baseZ + (topZ - baseZ) * t;
 
-                for (int c = 0; c <= kCols; ++c)
+                for (int c = 0; c <= cols; ++c)
                 {
-                    const float u = -1.0f + 2.0f * float(c) / float(kCols);
+                    const float u = -1.0f + 2.0f * float(c) / float(cols);
                     const float h = SoftEdge(fabsf(u));
                     xs[r][c] = pos[0] + sx * (w * u);
                     ys[r][c] = pos[1] + sy * (w * u);
-                    cs[r][c] = PackTint(style.beamAlpha * v * h * alphaScale, style.color,
+                    cs[r][c] = PackTint(style.beamAlpha * v * h * alphaScale, rgb,
                                         0.45f * h * (1.0f - 0.3f * t));
                 }
             }
 
-            for (int r = 0; r < kRows; ++r)
+            for (int r = 0; r < rows; ++r)
             {
-                for (int c = 0; c < kCols; ++c)
+                for (int c = 0; c < cols; ++c)
                 {
                     const float p00[3] = { xs[r][c],         ys[r][c],         zs[r] };
                     const float p10[3] = { xs[r][c + 1],     ys[r][c + 1],     zs[r] };
@@ -1164,28 +1212,21 @@ namespace wxl::scripts::loot_beam
 
     void LootBeam::QueueBeacon(const Beacon& beacon, float alphaScale, const float rgb[3])
     {
-        // The tint is per-beacon now, so it is applied to a copy the two shape builders read exactly
-        // as before rather than threading a colour through both of them.
-        BeamStyle style = style_;
-        style.color[0] = rgb[0];
-        style.color[1] = rgb[1];
-        style.color[2] = rgb[2];
-
-        beacon_gfx::SetDepth(style.throughWalls ? gfx::Depth::Through : gfx::Depth::Tested);
+        beacon_gfx::SetDepth(style_.throughWalls ? gfx::Depth::Through : gfx::Depth::Tested);
 
         // The body is on the ground, so its own position is the height the shaft rises from. Using a
         // ground query for the shaft risked a bad hit on a lower surface burying it under the
         // rendered terrain, so the position of the body itself is used.
         const float baseZ = beacon.pos[2];
 
-        if (style.showBeam && style.height > 0.01f)
-            QueueBeamColumn(beacon.pos, baseZ, style, alphaScale);
+        if (style_.showBeam && style_.height > 0.01f)
+            QueueBeamColumn(beacon.pos, baseZ, style_, alphaScale, rgb);
 
-        if (style.showSparkles && style.sparkleCount > 0)
+        if (style_.showSparkles && style_.sparkleCount > 0)
         {
-            int count = style.sparkleCount;
+            int count = style_.sparkleCount;
             if (count > kMaxSparkles) count = kMaxSparkles;
-            QueueSparkles(beacon.pos, beacon.sparkles, count, style, alphaScale, rgb);
+            QueueSparkles(beacon.pos, beacon.sparkles, count, style_, alphaScale, rgb);
         }
     }
 
@@ -1272,6 +1313,11 @@ namespace wxl::scripts::loot_beam
                 if (!style_.tiers[t].enabled) continue;
                 rgb = style_.tiers[t].color;
             }
+
+            // An off-screen shaft costs nothing to skip and would have drawn no pixel, so cull it
+            // before the queue. That is where a camp full of corpses stops paying for the bodies
+            // behind the camera or off the edge of the screen.
+            if (!BeamInView(beacons_[i].pos, style_)) continue;
 
             QueueBeacon(beacons_[i], pulseScale * beacons_[i].fade, rgb);
         }
