@@ -45,6 +45,7 @@ namespace wxl::scripts::loot_beam::beacon_gfx
             gx::rs::kSrcBlend, gx::rs::kDestBlend, gx::rs::kCullMode, gx::rs::kZFunc,
             gx::rs::kAlphaBlend, gx::rs::kFogEnable, gx::rs::kStencilEnable,
             gx::rs::kLighting, gx::rs::kColorWrite, gx::rs::kScissorTest,
+            24 /*D3DRS_ALPHAREF*/, 25 /*D3DRS_ALPHAFUNC*/,
         };
         constexpr size_t kTouchedStateCount = sizeof(kTouchedStates) / sizeof(kTouchedStates[0]);
 
@@ -136,7 +137,14 @@ namespace wxl::scripts::loot_beam::beacon_gfx
         dev.SetRenderState(gx::rs::kLighting, 0);
         dev.SetRenderState(gx::rs::kFogEnable, 0); // world fog would tint the beacon with distance
         dev.SetRenderState(gx::rs::kCullMode, gx::cull::kNone);
-        dev.SetRenderState(gx::rs::kAlphaTest, 0);
+        // Discard a fragment whose interpolated alpha is at or below ~1.5% (4 of 255). Additive light
+        // contributes almost nothing there, so the test trims the all-but-transparent rim and the
+        // faded ends of the falloff before they reach the blender, reclaiming fill on the soft edges.
+        // The cut sits below anything the eye can resolve against the world, so the picture is
+        // unchanged.
+        dev.SetRenderState(gx::rs::kAlphaTest, 1);
+        dev.SetRenderState(24 /*D3DRS_ALPHAREF*/, 4);
+        dev.SetRenderState(25 /*D3DRS_ALPHAFUNC*/, 5 /*D3DCMP_GREATER*/);
         dev.SetRenderState(gx::rs::kStencilEnable, 0);
         dev.SetRenderState(gx::rs::kScissorTest, 0);
         dev.SetRenderState(gx::rs::kColorWrite, gx::colorwrite::kAll);
