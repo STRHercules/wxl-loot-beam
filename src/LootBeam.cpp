@@ -50,8 +50,8 @@ namespace wxl::scripts::loot_beam
         constexpr float       kTwoPi      = 6.28318530717959f;
         constexpr float       kUnitToByte = 255.0f;
         // Bumped when a shipped default changes in a way an existing file must adopt. A file older
-        // than this has its stale distance/depth keys replaced with the always-visible defaults.
-        constexpr int         kConfigVersion = 6;
+        // than this has its stale keys replaced with the current shipped defaults.
+        constexpr int         kConfigVersion = 7;
 
         // INI key stem and panel label per GearTier, in the order the panel lists them. The stem names
         // the keys Tier.<Stem>.Enabled and Tier.<Stem>.Color.
@@ -369,13 +369,12 @@ namespace wxl::scripts::loot_beam
         bool SameStyle(const BeamStyle& a, const BeamStyle& b)
         {
             if (!(a.enabled == b.enabled && a.height == b.height && a.baseOffset == b.baseOffset &&
-                  a.groundRadius == b.groundRadius && a.beamWidth == b.beamWidth &&
+                  a.beamWidth == b.beamWidth &&
                   a.widthPerYard == b.widthPerYard &&
                   a.color[0] == b.color[0] && a.color[1] == b.color[1] && a.color[2] == b.color[2] &&
-                  a.groundAlpha == b.groundAlpha &&
                   a.beamAlpha == b.beamAlpha && a.pulse == b.pulse && a.pulseSpeed == b.pulseSpeed &&
                   a.fadeIn == b.fadeIn && a.fadeOut == b.fadeOut &&
-                  a.maxDistance == b.maxDistance && a.showGround == b.showGround &&
+                  a.maxDistance == b.maxDistance &&
                   a.showBeam == b.showBeam && a.throughWalls == b.throughWalls &&
                   a.requireLootable == b.requireLootable && a.lootColor == b.lootColor &&
                   a.serverColor == b.serverColor && a.showSparkles == b.showSparkles &&
@@ -441,18 +440,15 @@ namespace wxl::scripts::loot_beam
         BeamStyle s = BeamStyle{};
         s.enabled        = ReadBool(iniPath_,  "Enabled",       s.enabled);
         s.height         = ReadFloat(iniPath_, "Height",        s.height,        0.0f, 40.0f);
-        s.groundRadius   = ReadFloat(iniPath_, "GroundRadius",  s.groundRadius,  0.2f, 6.0f);
         s.beamWidth      = ReadFloat(iniPath_, "BeamWidth",     s.beamWidth,     0.05f, 2.0f);
         s.baseOffset     = ReadFloat(iniPath_, "BaseOffset",    s.baseOffset,    0.0f, 10.0f);
         s.widthPerYard   = ReadFloat(iniPath_, "WidthPerYard",  s.widthPerYard,  0.0f, 0.05f);
-        s.groundAlpha    = ReadFloat(iniPath_, "GroundAlpha",   s.groundAlpha,   0.0f, 1.0f);
         s.beamAlpha      = ReadFloat(iniPath_, "BeamAlpha",     s.beamAlpha,     0.0f, 1.0f);
         s.pulse          = ReadFloat(iniPath_, "Pulse",         s.pulse,         0.0f, 1.0f);
         s.pulseSpeed     = ReadFloat(iniPath_, "PulseSpeed",    s.pulseSpeed,    0.0f, 6.0f);
         s.fadeIn         = ReadFloat(iniPath_, "FadeIn",        s.fadeIn,        0.0f, 5.0f);
         s.fadeOut        = ReadFloat(iniPath_, "FadeOut",       s.fadeOut,       0.0f, 5.0f);
         s.maxDistance    = ReadFloat(iniPath_, "MaxDistance",   s.maxDistance,   0.0f, 400.0f);
-        s.showGround     = ReadBool(iniPath_,  "ShowGround",    s.showGround);
         s.showBeam       = ReadBool(iniPath_,  "ShowBeam",      s.showBeam);
         s.throughWalls   = ReadBool(iniPath_,  "ThroughWalls",  s.throughWalls);
         s.requireLootable= ReadBool(iniPath_,  "RequireLootable", s.requireLootable);
@@ -499,6 +495,21 @@ namespace wxl::scripts::loot_beam
             // marker a rise can hide is a marker that gets missed. An older file adopts always-visible,
             // and a file rewritten at version 5 or later keeps whatever the panel left it at.
             if (version < 5) s.throughWalls = true;
+            // Version 7 retunes the shipped look: a taller, narrower beam and a denser, tighter field
+            // of smaller, faster sparkles, with the ground pool removed. An older file adopts the new
+            // defaults; a file written at version 7 or later keeps whatever the panel left it at.
+            if (version < 7)
+            {
+                s.height         = 20.0f;
+                s.beamWidth      = 0.50f;
+                s.sparkleCount   = 24;
+                s.sparkleSize    = 0.04f;
+                s.sparkleAlpha   = 0.90f;
+                s.sparkleRise    = 1.00f;
+                s.sparkleDrift   = 0.05f;
+                s.sparkleLife    = 2.40f;
+                s.sparkleTwinkle = 6.00f;
+            }
         }
 
         style_ = s;
@@ -538,18 +549,15 @@ namespace wxl::scripts::loot_beam
 
         WriteInt(iniPath_,   "Enabled",         style_.enabled ? 1 : 0);
         WriteFloat(iniPath_, "Height",          style_.height);
-        WriteFloat(iniPath_, "GroundRadius",    style_.groundRadius);
         WriteFloat(iniPath_, "BeamWidth",       style_.beamWidth);
         WriteFloat(iniPath_, "BaseOffset",      style_.baseOffset);
         WriteFloat(iniPath_, "WidthPerYard",    style_.widthPerYard);
-        WriteFloat(iniPath_, "GroundAlpha",     style_.groundAlpha);
         WriteFloat(iniPath_, "BeamAlpha",       style_.beamAlpha);
         WriteFloat(iniPath_, "Pulse",           style_.pulse);
         WriteFloat(iniPath_, "PulseSpeed",      style_.pulseSpeed);
         WriteFloat(iniPath_, "FadeIn",          style_.fadeIn);
         WriteFloat(iniPath_, "FadeOut",         style_.fadeOut);
         WriteFloat(iniPath_, "MaxDistance",     style_.maxDistance);
-        WriteInt(iniPath_,   "ShowGround",      style_.showGround ? 1 : 0);
         WriteInt(iniPath_,   "ShowBeam",        style_.showBeam ? 1 : 0);
         WriteInt(iniPath_,   "ThroughWalls",    style_.throughWalls ? 1 : 0);
         WriteInt(iniPath_,   "RequireLootable", style_.requireLootable ? 1 : 0);
@@ -574,6 +582,12 @@ namespace wxl::scripts::loot_beam
             WriteInt(iniPath_,   enabled.c_str(), style_.tiers[t].enabled ? 1 : 0);
             WriteColor(iniPath_, color.c_str(),   style_.tiers[t].color);
         }
+
+        // The ground glow was removed from the module; drop its keys so an old file does not carry
+        // dead settings. A NULL string removes the key.
+        WritePrivateProfileStringA(kIniSection, "GroundRadius", nullptr, iniPath_.c_str());
+        WritePrivateProfileStringA(kIniSection, "GroundAlpha", nullptr, iniPath_.c_str());
+        WritePrivateProfileStringA(kIniSection, "ShowGround", nullptr, iniPath_.c_str());
 
         WriteInt(iniPath_,   "ConfigVersion",   kConfigVersion);
 
@@ -611,11 +625,9 @@ namespace wxl::scripts::loot_beam
         if (api.UiCollapsingHeader("Beacon"))
         {
             api.UiSliderFloat("Height (yd)", &style_.height, 0.0f, 40.0f);
-            api.UiSliderFloat("Ground radius (yd)", &style_.groundRadius, 0.2f, 6.0f);
             api.UiSliderFloat("Beam width (yd)", &style_.beamWidth, 0.05f, 2.0f);
             api.UiSliderFloat("Base offset (yd)", &style_.baseOffset, 0.0f, 5.0f);
             api.UiSliderFloat("Min width / yd", &style_.widthPerYard, 0.0f, 0.05f);
-            api.UiSliderFloat("Ground alpha", &style_.groundAlpha, 0.0f, 1.0f);
             api.UiSliderFloat("Beam alpha", &style_.beamAlpha, 0.0f, 1.0f);
 
             float rgba[4] = { style_.color[0], style_.color[1], style_.color[2], 1.0f };
@@ -654,8 +666,6 @@ namespace wxl::scripts::loot_beam
             api.UiSliderFloat("Fade out (s)", &style_.fadeOut, 0.0f, 5.0f);
             api.UiSliderFloat("Max distance (yd)", &style_.maxDistance, 0.0f, 400.0f);
 
-            int ground = style_.showGround ? 1 : 0;
-            if (api.UiCheckbox("Ground glow", &ground)) style_.showGround = ground != 0;
             int beam = style_.showBeam ? 1 : 0;
             if (api.UiCheckbox("Beam", &beam)) style_.showBeam = beam != 0;
             int walls = style_.throughWalls ? 1 : 0;
@@ -665,7 +675,7 @@ namespace wxl::scripts::loot_beam
             int lootColor = style_.lootColor ? 1 : 0;
             if (api.UiCheckbox("Colour by loot rarity", &lootColor)) style_.lootColor = lootColor != 0;
             int serverColor = style_.serverColor ? 1 : 0;
-            if (api.UiCheckbox("Prefer server loot colour", &serverColor)) style_.serverColor = serverColor != 0;
+            if (api.UiCheckbox("Use server loot colour", &serverColor)) style_.serverColor = serverColor != 0;
         }
 
         // One row per tier: a switch to draw it at all, and the colour it is drawn in. A tier switched
@@ -767,18 +777,19 @@ namespace wxl::scripts::loot_beam
             b->seen   = true;
 
             // A corpse the server tagged carries its tier (best quality, or money-only) from the
-            // moment it dies, so prefer it over the loot the client only learns once the window has
-            // opened.
+            // moment it dies, so it can colour the beacon before the loot window is ever opened.
+            // It only ever raises the tier: the server's hint is set once at death, so a rarer item
+            // the client later discovers for itself must not be pushed back down to it.
             int serverTier = -1;
-            if (style_.lootColor && style_.serverColor && UnitLootBeamTier(obj, serverTier))
+            if (style_.lootColor && style_.serverColor && UnitLootBeamTier(obj, serverTier) &&
+                serverTier > b->tier)
             {
-                b->tier       = serverTier;
-                b->serverTint = true;
-                if (!loggedServerHint_)
-                {
-                    loggedServerHint_ = true;
-                    Log(WXL_LOG_INFO, "diag: server loot hint guid=%llX tier=%d", guid, serverTier);
-                }
+                b->tier = serverTier;
+            }
+            if (style_.lootColor && style_.serverColor && !loggedServerHint_ && serverTier >= 0)
+            {
+                loggedServerHint_ = true;
+                Log(WXL_LOG_INFO, "diag: server loot hint guid=%llX tier=%d", guid, serverTier);
             }
             return true;
         });
@@ -787,9 +798,10 @@ namespace wxl::scripts::loot_beam
     }
 
     // Reads the loot the client currently holds and, when it belongs to a tracked corpse, records the
-    // GearTier of its best item on that beacon. The client keeps one loot at a time and only learns a
-    // corpse's contents when loot is requested for it, so the tier is adopted the moment the loot
-    // opens and kept on the tracked beacon afterwards. The server hint (above) takes precedence.
+    // GearTier of its rarest item on that beacon. The client keeps one loot at a time and only learns
+    // a corpse's contents when loot is requested for it, so the tier is adopted the moment the loot
+    // opens and kept on the tracked beacon afterwards. A tier is only ever raised, so the rarest item
+    // seen -- from the server hint above or the loot the client learns here -- always owns the colour.
     void LootBeam::ScanLoot()
     {
         if (!style_.lootColor)
@@ -818,12 +830,12 @@ namespace wxl::scripts::loot_beam
         if (lootTier_ < 0) return;
         for (int i = 0; i < trackedCount_; ++i)
         {
-            if (beacons_[i].guid == lootGuid_ && !beacons_[i].serverTint)
+            if (beacons_[i].guid == lootGuid_ && lootTier_ > beacons_[i].tier)
                 beacons_[i].tier = lootTier_;
         }
     }
 
-    // The GearTier of the best item in the currently open loot, asked of the client itself
+    // The GearTier of the rarest item in the currently open loot, asked of the client itself
     // (GetNumLootItems / GetLootSlotInfo) so no item-cache offset is reimplemented here. Returns -1
     // when there is no loot or the script state is not up; a slot whose fourth return is not a number
     // contributes nothing.
@@ -850,8 +862,14 @@ namespace wxl::scripts::loot_beam
                 // texture, item, quantity, quality, locked
                 if (script::PCall(state, 1, 5, 0) == 0)
                 {
-                    const int quality = int(script::ToNumber(state, -2));
-                    if (quality > best) best = quality;
+                    // The quality is the rarest thing the slot can tell us about; keep the highest
+                    // over every slot. A slot that answers nil (an item the client has not cached)
+                    // contributes nothing rather than counting as a grey.
+                    if (script::IsNumber(state, -2))
+                    {
+                        const int quality = int(script::ToNumber(state, -2));
+                        if (quality > best) best = quality;
+                    }
                 }
                 script::SetTop(state, base);
             }
@@ -966,76 +984,11 @@ namespace wxl::scripts::loot_beam
             return Pack(alpha, c);
         }
 
-        // A pool of light on the ground, built ring by ring with a colour on every vertex, so opacity
-        // and tint fall off smoothly from the hot centre to nothing at the rim and the GPU interpolates
-        // between rings. Every vertex is dropped onto the terrain, so it lies on a slope.
-        void QueueGroundGlow(const float pos[3], const BeamStyle& style, float alphaScale)
-        {
-            constexpr int   kSegments = 28;
-            constexpr int   kRings    = 5;
-            constexpr float kLift     = 0.12f; // clear of the terrain so it does not z-fight it
-
-            auto ringColor = [&](float radial) -> gfx::Color {
-                const float fall = SoftEdge(radial); // 1 at the core, 0 at the rim
-                return PackTint(style.groundAlpha * fall * alphaScale * 0.9f, style.color, 0.35f * fall);
-            };
-            auto ringPoint = [&](float radius, int i, float out[3]) {
-                const float angle = kTwoPi * float(i) / float(kSegments);
-                const float x = pos[0] + cosf(angle) * radius;
-                const float y = pos[1] + sinf(angle) * radius;
-                float z = pos[2];
-                world::GroundZ(x, y, pos[2], z);
-                // A miss, or a hit on a lower layer (a cave beneath a slope), must not sink the pool
-                // far below the body; clamp it to the body's own neighbourhood.
-                if (z < pos[2] - 3.0f) z = pos[2] - 3.0f;
-                if (z > pos[2] + 3.0f) z = pos[2] + 3.0f;
-                out[0] = x; out[1] = y; out[2] = z + kLift;
-            };
-
-            float centre[3];
-            ringPoint(0.0f, 0, centre); // angle is irrelevant at radius 0
-            const gfx::Color centreColor = ringColor(0.0f);
-
-            float inner[kSegments][3] = {};
-            float outer[kSegments][3] = {};
-
-            for (int r = 1; r <= kRings; ++r)
-            {
-                const float radius = style.groundRadius * float(r) / float(kRings);
-                for (int i = 0; i < kSegments; ++i)
-                    ringPoint(radius, i, outer[i]);
-
-                const gfx::Color outerColor = ringColor(float(r) / float(kRings));
-
-                if (r == 1)
-                {
-                    for (int i = 0; i < kSegments; ++i)
-                    {
-                        const int n = (i + 1) % kSegments;
-                        beacon_gfx::Triangle(centre, outer[i], outer[n], centreColor, outerColor, outerColor);
-                    }
-                }
-                else
-                {
-                    const gfx::Color innerColor = ringColor(float(r - 1) / float(kRings));
-                    for (int i = 0; i < kSegments; ++i)
-                    {
-                        const int n = (i + 1) % kSegments;
-                        beacon_gfx::Triangle(inner[i], outer[i], outer[n], innerColor, outerColor, outerColor);
-                        beacon_gfx::Triangle(inner[i], outer[n], inner[n], innerColor, outerColor, innerColor);
-                    }
-                }
-
-                for (int i = 0; i < kSegments; ++i)
-                    for (int k = 0; k < 3; ++k) inner[i][k] = outer[i][k];
-            }
-        }
-
         // The shaft: one camera-facing billboard, gridded so a colour can sit on every vertex. The
         // horizontal falloff keeps the core bright and the edges transparent; the vertical one is
         // transparent at the floating base, peaks just above it, then eases to nothing at the top.
         // Interpolated across the grid, a few quads read as a soft, hot-cored volume.
-        void QueueBeamColumn(const float pos[3], float groundZ, const BeamStyle& style, float alphaScale)
+        void QueueBeamColumn(const float pos[3], float bodyZ, const BeamStyle& style, float alphaScale)
         {
             float camera[3];
             cam::GetPosition(camera);
@@ -1057,8 +1010,8 @@ namespace wxl::scripts::loot_beam
             constexpr int kRows = 8;
             constexpr int kCols = 4;
 
-            const float baseZ = groundZ + style.baseOffset;
-            const float topZ  = groundZ + fmaxf(style.height, style.baseOffset + 0.1f);
+            const float baseZ = bodyZ + style.baseOffset;
+            const float topZ  = bodyZ + fmaxf(style.height, style.baseOffset + 0.1f);
 
             float      xs[kRows + 1][kCols + 1];
             float      ys[kRows + 1][kCols + 1];
@@ -1220,13 +1173,10 @@ namespace wxl::scripts::loot_beam
 
         beacon_gfx::SetDepth(style.throughWalls ? gfx::Depth::Through : gfx::Depth::Tested);
 
-        // The body is on the ground, so its own position is the height the shaft rises from. Only the
-        // pool needs a ground query, because it follows the terrain away from the body; using a query
-        // for the shaft too risked a bad hit on a lower surface burying it under the rendered terrain.
+        // The body is on the ground, so its own position is the height the shaft rises from. Using a
+        // ground query for the shaft risked a bad hit on a lower surface burying it under the
+        // rendered terrain, so the position of the body itself is used.
         const float baseZ = beacon.pos[2];
-
-        if (style.showGround)
-            QueueGroundGlow(beacon.pos, style, alphaScale);
 
         if (style.showBeam && style.height > 0.01f)
             QueueBeamColumn(beacon.pos, baseZ, style, alphaScale);

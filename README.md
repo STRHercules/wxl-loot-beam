@@ -6,13 +6,12 @@
 A pillar of light over every corpse that can still be looted.
 
 Hunting for the body you just killed means squinting at a pile of grey models and reading nameplates.
-**Loot Beam** puts a warm glow on the ground and a beam of light rising straight up from every NPC body
-that can still be looted, so the one worth walking to announces itself. The beam is capped at 15 yards
-by default -- tall enough to spot across a camp or clear a low rise, short enough to stay a marker
-rather than a light show. It draws through terrain and walls by default, so a body tucked behind a rise
-is never missed; turn **Through walls** off to let the world occlude it like any other geometry.
+**Loot Beam** raises a beam of light straight up from every NPC body that can still be looted, so the
+one worth walking to announces itself. The beam is capped at 20 yards by default -- tall enough to spot
+across a camp or clear a low rise, short enough to stay a marker rather than a light show. It draws
+through terrain and walls by default, so a body tucked behind a rise is never missed; turn **Through
+walls** off to let the world occlude it like any other geometry.
 
-- a soft pool of light on the terrain, falling off smoothly from a hot centre rather than a flat circle;
 - a camera-facing shaft rises a little above the body and fades in from transparent there, peaking a
   short way up and easing to nothing at the top, with a horizontal falloff that keeps its edges soft
   and its core whiter;
@@ -23,33 +22,37 @@ is never missed; turn **Through walls** off to let the world occlude it like any
 - colour, size, height, opacity, range, pulse, fade and the sparkles are all tunable from the in-game
   overlay panel under **Loot Beam**;
 - with **Colour by loot rarity** on (the default), a corpse whose loot is known glows in the quality
-  colour of its best item -- green for a green, purple for an epic -- instead of the default gold.
+  colour of its rarest item -- green for a green, purple for an epic -- instead of the default gold.
 
 ## Loot rarity colour
 
-The beacon is tinted with the best item quality in the corpse's loot, using the game's own quality
+The beacon is tinted with the rarest item quality in the corpse's loot, using the game's own quality
 colours (poor grey, common white, uncommon green, rare blue, epic purple, legendary orange, artifact
-gold). A body whose loot is not known keeps the configured `Color`.
+gold). A corpse holding several items takes the colour of the highest quality among them, so a body
+with one epic and a pile of greys reads purple. A body whose loot is not known keeps the configured
+`Color`.
 
 The 3.3.5a client only receives a corpse's loot when loot is requested for it -- normally the loot
 window opening -- so on a stock server the quality colour appears once you have opened that body. The
 module reads the loot the client already holds (via the client's own `GetNumLootItems` /
-`GetLootSlotInfo` script functions) and caches the best quality against the corpse's GUID.
+`GetLootSlotInfo` script functions) and caches the rarest quality against the corpse's GUID.
 
 ### Server-driven colour
 
 To colour a beam the moment the body dies -- before anyone opens it -- run the companion
 **mod-loot-beam** module on the AzerothCore server. At creature death the server has just rolled the
-corpse's loot, so it computes the best item quality in it and writes that back onto the corpse's own
+corpse's loot, so it computes the rarest item quality in it and writes that back onto the corpse's own
 `UNIT_FIELD_PADDING` update field as `quality + 1` (0 means "no hint"; 9 means the loot held money but
 no gear, the `Currency` tier). The client reads that field straight out of the object it is already
 walking, so the beacon is the right colour immediately and no custom opcode, addon message or client
 patch is involved.
 
-This is opt-in on the client too: with **Prefer server loot colour** on (the default, `ServerColor=1`)
-the server's quality wins over the loot the client discovers for itself; with it off the module
-ignores the field and behaves exactly as it did before. On a server that does not run the module the
-field stays 0 and the client falls back to its own loot, so nothing needs changing.
+This is opt-in on the client too: with **Use server loot colour** on (the default, `ServerColor=1`)
+the server's hint and the loot the client discovers for itself are merged, and whichever holds the
+rarest item wins. The server still gives a body its colour the instant it dies, but it can never pin a
+beacon below a rarer item the client later learns -- the colour only ever climbs. With the option off
+the module ignores the field and uses the client's own loot alone. On a server that does not run the
+module the field stays 0 and the client falls back to its own loot, so nothing needs changing.
 
 Turn **Colour by loot rarity** off (or set `LootColor=0`) to use a single fixed tint; that disables
 the server colour as well.
@@ -62,9 +65,9 @@ the panel's **Gear tiers** section (and the `Tier.*` keys in the INI):
 | Tier | Meaning |
 |---|---|
 | `Currency` | the corpse's loot held money but no gear (server-flagged; the client cannot tell on its own) |
-| `Poor` .. `Heirloom` | the best item quality in the loot: 0 grey, 1 white, 2 green, 3 blue, 4 purple, 5 orange, 6 artifact, 7 heirloom |
+| `Poor` .. `Heirloom` | the rarest item quality in the loot: 0 grey, 1 white, 2 green, 3 blue, 4 purple, 5 orange, 6 artifact, 7 heirloom |
 
-A tier switched off produces **no beacon at all** for corpses whose best loot falls into it, so you
+A tier switched off produces **no beacon at all** for corpses whose rarest loot falls into it, so you
 can hide e.g. currency-only or uncommon bodies and keep the rest. The defaults are the game's own
 quality colours; a body whose loot (and so tier) is not known still uses `Color`.
 
@@ -92,8 +95,7 @@ its beacon with no cleanup.
 
 The draw is additive (source alpha added to the frame, so the beacon glows and never dims what is
 behind it) with a colour on every vertex, so the GPU interpolates the falloffs and a handful of quads
-read as a soft volume. The ground pool follows the terrain vertex by vertex and falls off smoothly
-from its hot middle outward; the shaft is one camera-facing billboard, gridded across its width and up
+read as a soft volume. The shaft is one camera-facing billboard, gridded across its width and up
 its height so its horizontal and vertical falloffs read as light rather than a slab.
 
 ## Tuning
@@ -105,26 +107,25 @@ with the defaults on first load.
 
 | Key | Meaning |
 |---|---|
-| `Height` | how far the beam rises, yards (default 15) |
+| `Height` | how far the beam rises, yards (default 20) |
 | `BaseOffset` | how far above the body the shaft begins, yards (default 1) |
-| `GroundRadius` | radius of the glow on the ground |
-| `BeamWidth` | half-width of the beam at its base |
-| `GroundAlpha`, `BeamAlpha` | opacity of the ground glow and the beam |
+| `BeamWidth` | half-width of the beam at its base (default 0.5) |
+| `BeamAlpha` | opacity of the beam |
 | `Color` | tint, as `#RRGGBB` |
 | `Pulse`, `PulseSpeed` | breathing depth and rate |
 | `FadeIn`, `FadeOut` | seconds to ease a beacon in on appear / out on loot (0 = instant) |
 | `Sparkles` | draw drifting, twinkling motes around the beam (default on) |
-| `SparkleCount` | motes per beacon, 0..32 (default 8) |
-| `SparkleSize`, `SparkleAlpha` | half-size in yards and peak opacity of a mote |
-| `SparkleRise`, `SparkleDrift` | a mote's upward drift and lateral wander, yards/s |
-| `SparkleLife`, `SparkleTwinkle` | seconds a mote lives before it is reborn, and its flicker rate |
+| `SparkleCount` | motes per beacon, 0..32 (default 24) |
+| `SparkleSize`, `SparkleAlpha` | half-size in yards (default 0.04) and peak opacity of a mote |
+| `SparkleRise`, `SparkleDrift` | a mote's upward drift (default 1.0) and lateral wander (default 0.05), yards/s |
+| `SparkleLife`, `SparkleTwinkle` | seconds a mote lives before it is reborn, and its flicker rate (default 6.0) |
 | `MaxDistance` | ignore corpses beyond this range (0 = unlimited) |
-| `ShowGround`, `ShowBeam` | keep just one half of the marker |
+| `ShowBeam` | draw the beam (the sparkles can still be shown without it) |
 | `ThroughWalls` | draw through terrain and walls (on by default, so a rise cannot hide the beacon) |
 | `WidthPerYard` | minimum beam half-width per yard of camera distance |
 | `RequireLootable` | only beam corpses the server still flags lootable (default on) |
-| `LootColor` | tint a known corpse by its best loot quality (default on) instead of `Color` |
-| `ServerColor` | prefer the quality the server puts on the corpse (default on) over the locally read loot |
+| `LootColor` | tint a known corpse by the rarest item quality in its loot (default on) instead of `Color` |
+| `ServerColor` | also read the server's best-loot hint and let the rarest of it and the locally read loot win (default on) |
 | `Tier.<name>.Enabled`, `Tier.<name>.Color` | per-tier on/off and colour; `<name>` is `Currency`, `Poor`, `Common`, `Uncommon`, `Rare`, `Epic`, `Legendary`, `Artifact`, `Heirloom` |
 
 ## Notes

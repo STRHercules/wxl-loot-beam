@@ -1,5 +1,5 @@
-// wxl-loot-beam: a light on the ground that rises a fixed distance into the sky over every NPC body
-// that can still be looted.
+// wxl-loot-beam: a beam of light that rises a fixed distance into the sky over every NPC body that
+// can still be looted.
 // Copyright (C) 2026 WarcraftXL
 //
 // This program is free software: you can redistribute it and/or modify
@@ -80,11 +80,10 @@ namespace wxl::scripts::loot_beam
     struct BeamStyle
     {
         bool  enabled        = true;   // master switch
-        float height         = 15.0f;  // how far the beam rises, yards (the "15 metres" of the brief)
+        float height         = 20.0f;  // how far the beam rises, yards
         float baseOffset     = 1.0f;   // how far above the body the shaft begins, yards; it fades in
                                        // from transparent there, so it gathers out of the air
-        float groundRadius   = 1.70f;  // radius of the glow painted on the ground, yards
-        float beamWidth      = 0.70f;  // half-width of the beam at its base, yards
+        float beamWidth      = 0.50f;  // half-width of the beam at its base, yards
         float widthPerYard   = 0.010f; // minimum half-width per yard of camera distance (0 = off); a
                                        // beam that never thins with distance stays a legible column
         float color[3]       = { 1.00f, 0.82f, 0.42f }; // warm gold; the fallback while a body's
@@ -105,7 +104,6 @@ namespace wxl::scripts::loot_beam
             { true, { 0.00f, 0.80f, 1.00f } }, // kTierHeirloom
         };
 
-        float groundAlpha    = 0.45f;  // opacity of the filled ground glow at its centre
         float beamAlpha      = 0.60f;  // opacity of the beam at its base
         float pulse          = 0.20f;  // slow breathing depth, 0 = steady
         float pulseSpeed     = 1.60f;  // breathing rate
@@ -113,7 +111,6 @@ namespace wxl::scripts::loot_beam
         float fadeOut        = 0.70f;  // seconds for a lost beacon to fade away (0 = instant)
 
         float maxDistance    = 0.0f;   // ignore corpses farther than this, yards (0 = unlimited)
-        bool  showGround     = true;   // paint the glow on the ground
         bool  showBeam       = true;   // raise the beam
         // Draw the beacon through terrain and walls (the default), so a corpse tucked behind a rise is
         // never missed. Turn it off to let the world occlude the marker as real light would.
@@ -123,28 +120,30 @@ namespace wxl::scripts::loot_beam
         // body goes dark; false marks every dead NPC.
         bool  requireLootable = true;
 
-        // true (the default) tints a corpse's beacon with the quality colour of the best item its loot
-        // is known to hold, and falls back to Color / the panel's tint while that loot is unknown. The
-        // 3.3.5a client only learns a corpse's loot when loot is requested for it, so the tint appears
-        // once the body has been opened.
+        // true (the default) tints a corpse's beacon with the quality colour of the rarest item its
+        // loot is known to hold, and falls back to Color / the panel's tint while that loot is
+        // unknown. The 3.3.5a client only learns a corpse's loot when loot is requested for it, so the
+        // tint appears once the body has been opened.
         bool  lootColor = true;
 
-        // true (the default) prefers the quality the server put on the corpse (see UnitFields.hpp /
-        // the companion AzerothCore module) over the loot the client discovers for itself. That lets
-        // the beacon be the right colour the moment the body dies, without waiting for the loot
-        // window. When the server sends no hint the local loot is used as before.
+        // true (the default) also reads the quality the server put on the corpse (see UnitFields.hpp
+        // / the companion AzerothCore module), so the beacon can be the right colour the moment the
+        // body dies, before the loot window. The server hint and the loot the client discovers are
+        // merged: whichever holds the rarest item wins, so the server cannot pin a beacon below a
+        // rarer item the client later sees. When the server sends no hint the local loot is used
+        // alone.
         bool  serverColor = true;
 
         // Sparkle motes that drift and twinkle around the beam, per beacon. The field is seeded from
         // the corpse's GUID, so no two bodies flicker in lockstep. Count is capped at kMaxSparkles.
         bool  showSparkles   = true;   // draw drifting sparkle motes around the beam
-        int   sparkleCount   = 8;      // motes per beacon
-        float sparkleSize    = 0.09f;  // half-extent of a mote, yards
+        int   sparkleCount   = 24;     // motes per beacon
+        float sparkleSize    = 0.04f;  // half-extent of a mote, yards
         float sparkleAlpha   = 0.90f;  // peak opacity of a mote at the crest of its twinkle
-        float sparkleRise    = 0.90f;  // upward drift, yards/s
-        float sparkleDrift   = 0.35f;  // lateral wander, yards/s
+        float sparkleRise    = 1.00f;  // upward drift, yards/s
+        float sparkleDrift   = 0.05f;  // lateral wander, yards/s
         float sparkleLife    = 2.40f;  // seconds a mote lives before it respawns
-        float sparkleTwinkle = 4.00f;  // flicker speed, radians/s
+        float sparkleTwinkle = 6.00f;  // flicker speed, radians/s
     };
 
     class LootBeam final : public wxl::ext::EventScript
@@ -184,11 +183,11 @@ namespace wxl::scripts::loot_beam
 
         // --- steps ---
         int  ScanUnits();                       // mark tracked beacons seen this frame; returns units seen
-        void ScanLoot();                        // adopt the open loot's best quality onto its corpse
-        int  ReadLootTier();                    // GearTier of the currently open loot, or -1
+        void ScanLoot();                        // raise the beacon to the open loot's rarest quality
+        int  ReadLootTier();                    // GearTier of the rarest item in the open loot, or -1
         void UpdateFade(float dt);              // advance each beacon's fade; drop the dead ones
         void DumpUnit(void* unit, unsigned long long guid); // one-shot descriptor window for debugging
-        void QueueBeacon(const Beacon& beacon, float alphaScale, const float rgb[3]); // glow + beam + motes
+        void QueueBeacon(const Beacon& beacon, float alphaScale, const float rgb[3]); // beam + motes
         void SeedSparkles(Beacon& b);  // fill a new beacon's mote field from its GUID
         void AdvanceSparkles(Beacon& b, float dt); // drift and respawn a beacon's motes
         void LoadConfigNow();
@@ -200,8 +199,7 @@ namespace wxl::scripts::loot_beam
             unsigned long long guid = 0;
             float              pos[3] = {};
             float              fade   = 0.0f; // 0..1 opacity multiplier, eased over fadeIn/fadeOut
-            int                tier = -1;     // GearTier of the corpse's loot, -1 until known
-            bool               serverTint = false; // tier came from the server, not the open loot
+            int                tier = -1;     // rarest GearTier known for the corpse, -1 until known
             bool               seen   = false;
 
             Sparkle            sparkles[kMaxSparkles]{}; // self-refreshing mote field for this body

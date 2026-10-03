@@ -3,6 +3,14 @@
 # into every extension, so the only extra step is deploying the INI beside the DLL (the core copies the
 # DLL itself).
 
+# The companion AzerothCore module under server/ is its own CMake project for the server side and must
+# not be linked into the client DLL, but the core discovers extension sources with a recursive glob.
+# Mark its sources header-only so the glob finds them while the client target ignores them.
+file(GLOB_RECURSE WXL_LOOT_BEAM_SERVER_SRC "${wxl_ext_dir}/server/*.cpp")
+if(WXL_LOOT_BEAM_SERVER_SRC)
+    set_source_files_properties(${WXL_LOOT_BEAM_SERVER_SRC} PROPERTIES HEADER_FILE_ONLY TRUE)
+endif()
+
 if(CLIENT_PATH)
     add_custom_command(TARGET ${wxl_ext_name} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E make_directory "${CLIENT_PATH}/Extensions/${wxl_ext_name}"
